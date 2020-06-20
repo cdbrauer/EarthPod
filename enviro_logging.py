@@ -1,4 +1,10 @@
-# Copyright 2020 - Cole Brauer
+"""
+EarthPod Environment Logging
+
+----
+
+Copyright 2020 - Cole Brauer
+"""
 
 from coral.enviro.board import EnviroBoard
 from coral.cloudiot.core import CloudIot
@@ -17,12 +23,10 @@ def update_display(display, msg):
     with canvas(display) as draw:
         draw.text((0, 0), msg, fill='white')
 
-
-def _none_to_nan(val):
+def check_nan(val):
     return float('nan') if val is None else val
 
-
-def main():
+if __name__ == '__main__':
     # Save program start time
     t0 = time.time()
 
@@ -74,14 +78,14 @@ def main():
                 print(str(sensors))
 
             # Display temperature and RH
-            msg = 'Temp: %.2f C\n' % _none_to_nan(sensors['temperature'])
-            msg += 'RH: %.2f %%' % _none_to_nan(sensors['humidity'])
+            msg = 'Temp: %.2f C\n' % check_nan(sensors['temperature'])
+            msg += 'RH: %.2f %%' % check_nan(sensors['humidity'])
             update_display(enviro.display, msg)
             sleep(args.time_step / 2)
 
             # After half of time_step, switch to light and pressure.
-            msg = 'Light: %.2f lux\n' % _none_to_nan(sensors['ambient_light'])
-            msg += 'Pressure: %.2f kPa' % _none_to_nan(sensors['pressure'])
+            msg = 'Light: %.2f lux\n' % check_nan(sensors['ambient_light'])
+            msg += 'Pressure: %.2f kPa' % check_nan(sensors['pressure'])
             update_display(enviro.display, msg)
             sleep(args.time_step / 2)
 
@@ -89,7 +93,3 @@ def main():
             if read_count % read_period == 0 and cloud.enabled():
                 print('Publishing')
                 cloud.publish_message(sensors)
-
-
-if __name__ == '__main__':
-    main()

@@ -1,4 +1,10 @@
-# Copyright 2020 - Cole Brauer
+"""
+EarthPod Environment Logging with Wind
+
+----
+
+Copyright 2020 - Cole Brauer
+"""
 
 import argparse
 import itertools
@@ -17,41 +23,39 @@ MODE_PIN = 13
 
 DEFAULT_CONFIG_LOCATION = os.path.join(os.path.dirname(__file__), 'cloud_config.ini')
 
-counter = 0
+global counter
 
 def update_display(display, msg):
     with canvas(display) as draw:
         draw.text((0, 0), msg, fill='white')
 
-
-def _none_to_nan(val):
+def check_nan(val):
     return float('nan') if val is None else val
     
 def increment_counter(channel):
     global counter
     counter += 1
 
-
-def main():
-    global counter
-
+if __name__ == '__main__':
     # Save program start time
     t0 = time.time()
+    counter = 0
 
     # Pull arguments from command line.
     parser = argparse.ArgumentParser(description='Enviro Kit Datalogging')
     parser.add_argument('--filename', help='File for storing sensor data logs', type=str, default=('Log_' + str(time.asctime(time.localtime(time.time()))).replace(' ', '_').replace(':', '-') + '.csv'))
-    parser.add_argument('--time_step', help='Measurement logging interval (seconds)', type=int, default=4)
+    parser.add_argument('--time_step', help='Measurement logging interval (seconds)', type=int, default=6)
     parser.add_argument('--upload_step', help='Cloud upload interval (seconds)', type=int, default=300)
     parser.add_argument('--cloud_config', help='Cloud IoT config file', default=DEFAULT_CONFIG_LOCATION)
     parser.add_argument('--display', help='Enable printing data to terminal', type=int, default=False)
+    parser.add_argument('--wind', help='Enable printing wind rev/sec to terminal', type=int, default=False)
     args = parser.parse_args()
 
     # Create log file
     f = open(os.path.join(os.path.dirname(__file__), 'logs/') + args.filename, 'w+')
     f.write('EarthPod Sensor Log\n')
     f.write('Created: ' + str(time.asctime(time.localtime(time.time()))) + '\n\n')
-    f.write('Measurement Time,Time Step (s),Temperature (C),Humidity (%),Light (lux),Pressure (kPa),Wind (counts/step)\n')
+    f.write('Measurement Time,Time Step (s),Temperature (C),Humidity (%),Light (lux),Pressure (kPa),Wind (m/s)\n')
     f.close()
     
     # Enable anemometer board
@@ -81,7 +85,7 @@ def main():
             sensors['humidity'] = enviro.humidity
             sensors['ambient_light'] = enviro.ambient_light
             sensors['pressure'] = enviro.pressure
-            sensors['wind'] = counter
+            sensors['wind'] = (counter/sensors['time_step'])*0.053
             counter = 0
 
             # Save latest data
@@ -99,32 +103,25 @@ def main():
             if args.display:
                 print(str(sensors))
 
+            if args.wind:
+                print(str(sensors['wind']) + ' m/s')
+
             # Display temperature and RH
-            msg = 'Wind: %.2f\n' % _none_to_nan(counter)
-            msg += 'Temp: %.2f C' % _none_to_nan(sensors['temperature'])
+            msg = 'Wind: %.2f m/s\n' % check_nan(sensors['wind'])
+            msg += 'Temp: %.2f C' % check_nan(sensors['temperature'])
             update_display(enviro.display, msg)
-            sleep(args.time_step / 4)
-            
-            msg = 'Wind: %.2f\n' % _none_to_nan(counter)
-            msg += 'RH: %.2f %%' % _none_to_nan(sensors['humidity'])
+            sleep(args.time_step / 3)
+
+            msg = 'RH: %.2f %%\n' % check_nan(sensors['humidity'])
+            msg += 'Pressure: %.2f kPa' % check_nan(sensors['pressure'])
             update_display(enviro.display, msg)
-            sleep(args.time_step / 4)
-            
-            msg = 'Wind: %.2f\n' % _none_to_nan(counter)
-            msg += 'Light: %.2f lux' % _none_to_nan(sensors['ambient_light'])
+            sleep(args.time_step / 3)
+
+            msg = 'Light: %.2f lux\n' % check_nan(sensors['ambient_light'])
             update_display(enviro.display, msg)
-            sleep(args.time_step / 4)
-            
-            msg = 'Wind: %.2f\n' % _none_to_nan(counter)
-            msg += 'Pressure: %.2f kPa' % _none_to_nan(sensors['pressure'])
-            update_display(enviro.display, msg)
-            sleep(args.time_step / 4)
+            sleep(args.time_step / 3)
 
             # If time has elapsed, attempt cloud upload.
             if read_count % read_period == 0 and cloud.enabled():
                 print('Publishing')
                 cloud.publish_message(sensors)
-
-
-if __name__ == '__main__':
-    main()
