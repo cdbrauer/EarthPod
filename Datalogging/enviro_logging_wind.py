@@ -20,14 +20,45 @@ MODE_PIN = 13
 
 global counter
 
-def update_display(display, msg):
-    with canvas(display) as draw:
-        draw.text((0, 0), msg, fill='white')
+def press_anemometer_mode(duration: float):
+    """
+    Simulate pressing the anemometer mode button.
 
-def check_nan(val):
+    :param duration: Duration of press in seconds
+    :return: None
+    """
+    GPIO.setup(MODE_PIN, GPIO.OUT)
+    GPIO.output(MODE_PIN, False)
+    sleep(duration)
+    GPIO.setup(MODE_PIN, GPIO.IN)
+
+def update_display(display, message: str):
+    """
+    Update environmental sensor board display.
+
+    :param display: Display object
+    :param message: Message string
+    :return: None
+    """
+    with canvas(display) as draw:
+        draw.text((0, 0), message, fill='white')
+
+def check_nan(val: float):
+    """
+    If value does not exist, return nan.
+
+    :param val: Value to check
+    :return: Value or nan
+    """
     return float('nan') if val is None else val
     
 def increment_counter(channel):
+    """
+    Callback function to increment the global counter variable.
+
+    :param channel: Interrupt channel
+    :return: None
+    """
     global counter
     counter += 1
 
@@ -55,10 +86,7 @@ if __name__ == '__main__':
     
     # Enable anemometer board
     GPIO.setmode(GPIO.BCM)
-    GPIO.setup(MODE_PIN, GPIO.OUT)
-    GPIO.output(MODE_PIN, False)
-    sleep(2)
-    GPIO.setup(MODE_PIN, GPIO.IN)
+    press_anemometer_mode(2)
     
     # Initialize anemometer sensor interrupt
     GPIO.setup(ENC_PIN, GPIO.IN)
@@ -66,20 +94,24 @@ if __name__ == '__main__':
 
     # Create instances of EnviroKit and Cloud IoT.
     enviro = EnviroBoard()
-    while True:
-        # Indefinitely update display and log data
-        sensors = {}
 
+    # Indefinitely update display and log data
+    while True:
         # Read sensors
-        sensors['time'] = str(time.asctime(time.localtime(time.time())))
-        sensors['time_step'] = round(time.time() - t0, 3)
-        t0 = time.time()
-        sensors['temperature'] = enviro.temperature
-        sensors['humidity'] = enviro.humidity
-        sensors['ambient_light'] = enviro.ambient_light
-        sensors['pressure'] = enviro.pressure
+        sensors = {'time': str(time.asctime(time.localtime(time.time()))),
+                   'time_step': round(time.time() - t0, 3),
+                   'temperature': enviro.temperature,
+                   'humidity': enviro.humidity,
+                   'ambient_light': enviro.ambient_light,
+                   'pressure': enviro.pressure}
         sensors['wind'] = (counter/sensors['time_step'])*0.053
+
+        # Reset timer and counter
+        t0 = time.time()
         counter = 0
+
+        # Keep anemometer awake
+        press_anemometer_mode(0.1)
 
         # Save latest data
         f = open(os.path.join(os.path.dirname(__file__), 'logs/') + args.filename, 'a+')
