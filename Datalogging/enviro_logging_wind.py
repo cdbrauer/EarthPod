@@ -89,11 +89,15 @@ if __name__ == '__main__':
     press_anemometer_mode(2)
     
     # Initialize anemometer sensor interrupt
+    print('Enabling anemometer...')
     GPIO.setup(ENC_PIN, GPIO.IN)
     GPIO.add_event_detect(ENC_PIN, GPIO.RISING, callback=increment_counter, bouncetime=3)
 
     # Create instances of EnviroKit and Cloud IoT.
     enviro = EnviroBoard()
+
+    # Done with initialization
+    print('Done')
 
     # Indefinitely update display and log data
     while True:
