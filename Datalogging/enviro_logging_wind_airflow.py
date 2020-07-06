@@ -82,7 +82,7 @@ if __name__ == '__main__':
     f = open(os.path.join(os.path.dirname(__file__), 'logs/') + args.filename, 'w+')
     f.write('EarthPod Sensor Log\n')
     f.write('Created: ' + str(time.asctime(time.localtime(time.time()))) + '\n\n')
-    f.write('Measurement Time,Time Step (s),Temperature (C),Humidity (%),Light (lux),Pressure (kPa),Wind (m/s)\n')
+    f.write('Measurement Time,Time Step (s),Temperature (C),Humidity (%),Light (lux),Pressure (kPa),Interrupt Counter (counts/time step),Wind (m/s),Airflow (m/s),Airflow Error\n')
     f.close()
     
     # Enable anemometer board
@@ -108,13 +108,18 @@ if __name__ == '__main__':
         # Read built-in sensors
         sensors = {'time': str(time.asctime(time.localtime(time.time()))),
                    'time_step': round(time.time() - t0, 3),
+                   'count':counter,
                    'temperature': enviro.temperature,
                    'humidity': enviro.humidity,
                    'ambient_light': enviro.ambient_light,
                    'pressure': enviro.pressure}
 
-        # Read anemometer
-        sensors['wind'] = (counter/sensors['time_step'])*0.053
+        # Reset timer and counter
+        t0 = time.time()
+        counter = 0
+
+        # Get anemometer reading
+        sensors['wind'] = (sensors['count']/sensors['time_step'])*0.053
 
         # Read airflow sensor
         msgOut = bytearray([1, 0, 0, 1^0^0])
@@ -123,16 +128,11 @@ if __name__ == '__main__':
 
         if len(msgIn) < 4:
             print('Warning: ' + str(len(msgIn)) + '/4 bytes received')
-            sensors['airflowSuccess'] = 0
+            sensors['airflowError'] = 1
         else:
-            sensors['airflowSuccess'] = 1
+            sensors['airflowError'] = 0
 
-        sensors['airflowB'] = int.from_bytes(msgIn[0:2], byteorder='big')
-        sensors['airflowL'] = int.from_bytes(msgIn[0:2], byteorder='little')
-
-        # Reset timer and counter
-        t0 = time.time()
-        counter = 0
+        sensors['airflow'] = int.from_bytes(msgIn[0:2], byteorder='big')/1000.0
 
         # Keep anemometer awake
         press_anemometer_mode(0.1)
@@ -145,27 +145,30 @@ if __name__ == '__main__':
         f.write(str(sensors['humidity']) + ',')
         f.write(str(sensors['ambient_light']) + ',')
         f.write(str(sensors['pressure']) + ',')
-        f.write(str(sensors['wind']) + '\n')
+        f.write(str(sensors['count']) + ',')
+        f.write(str(sensors['wind']) + ',')
+        f.write(str(sensors['airflow']) + ',')
+        f.write(str(sensors['airflowError']) + '\n')
         f.close()
 
         # Print data to terminal
         if args.display:
             print(str(sensors))
-
-        if args.wind:
-            print(str(sensors['wind']) + ' m/s')
+        elif args.wind:
+            print(str(sensors['wind']) + ' m/s, ' + str(sensors['airflow']) + 'm/s')
 
         # Display temperature and RH
         msg = 'Wind: %.2f m/s\n' % check_nan(sensors['wind'])
-        msg += 'Temp: %.2f C' % check_nan(sensors['temperature'])
+        msg += 'Airflow: %.2f m/s' % check_nan(sensors['airflow'])
         update_display(enviro.display, msg)
         sleep(args.time_step / 3)
 
-        msg = 'RH: %.2f %%\n' % check_nan(sensors['humidity'])
-        msg += 'Pressure: %.2f kPa' % check_nan(sensors['pressure'])
+        msg = 'Temp: %.2f C\n' % check_nan(sensors['temperature'])
+        msg += 'RH: %.2f %%' % check_nan(sensors['humidity'])
         update_display(enviro.display, msg)
         sleep(args.time_step / 3)
 
-        msg = 'Light: %.2f lux\n' % check_nan(sensors['ambient_light'])
+        msg = 'Pressure: %.2f kPa\n' % check_nan(sensors['pressure'])
+        msg += 'Light: %.2f lux' % check_nan(sensors['ambient_light'])
         update_display(enviro.display, msg)
         sleep(args.time_step / 3)
