@@ -63,6 +63,19 @@ def increment_counter(channel):
     global counter
     counter += 1
 
+def read_airflow_sensor(message: list):
+    recv_error = 0
+
+    msgOut = bytearray(message[0:4])
+    ser.write(msgOut)
+
+    msgIn = ser.read(4)
+    if len(msgIn) < 4:
+        print('Warning: ' + str(len(msgIn)) + '/4 bytes received')
+        recv_error = 1
+
+    return int.from_bytes(msgIn[0:2], byteorder='big'), recv_error
+
 if __name__ == '__main__':
     print('Initializing...')
 
@@ -82,7 +95,7 @@ if __name__ == '__main__':
     f = open(os.path.join(os.path.dirname(__file__), 'logs/') + args.filename, 'w+')
     f.write('EarthPod Sensor Log\n')
     f.write('Created: ' + str(time.asctime(time.localtime(time.time()))) + '\n\n')
-    f.write('Measurement Time,Time Step (s),Temperature (C),Humidity (%),Light (lux),Pressure (kPa),Interrupt Counter (counts/time step),Wind (m/s),Airflow (m/s),Airflow Error\n')
+    f.write('Measurement Time,Time Step (s),Temperature (C),Humidity (%),Light (lux),Pressure (kPa),Interrupt Counter (counts/time step),Wind (m/s),Airflow (m/s),Airflow Ambient Temp (C),Airflow Error\n')
     f.close()
     
     # Enable anemometer board
@@ -122,17 +135,13 @@ if __name__ == '__main__':
         sensors['wind'] = (sensors['count']/sensors['time_step'])*0.053
 
         # Read airflow sensor
-        msgOut = bytearray([1, 0, 0, 1^0^0])
-        ser.write(msgOut)
-        msgIn = ser.read(4)
+        airflow, error = read_airflow_sensor([1, 0, 0, 1^0^0])
+        sensors['airflow'] = airflow/1000.0
+        sensors['airflowError'] = error
 
-        if len(msgIn) < 4:
-            print('Warning: ' + str(len(msgIn)) + '/4 bytes received')
-            sensors['airflowError'] = 1
-        else:
-            sensors['airflowError'] = 0
-
-        sensors['airflow'] = int.from_bytes(msgIn[0:2], byteorder='big')/1000.0
+        t_ambient, error = read_airflow_sensor([2, 0, 0, 2^0^0])
+        sensors['airflowAmbTemp'] = t_ambient/100.0
+        sensors['airflowError'] = sensors['airflowError'] or error
 
         # Keep anemometer awake
         press_anemometer_mode(0.1)
@@ -148,6 +157,7 @@ if __name__ == '__main__':
         f.write(str(sensors['count']) + ',')
         f.write(str(sensors['wind']) + ',')
         f.write(str(sensors['airflow']) + ',')
+        f.write(str(sensors['airflowAmbTemp']) + ',')
         f.write(str(sensors['airflowError']) + '\n')
         f.close()
 
