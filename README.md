@@ -1,5 +1,5 @@
 # EarthPod-Mini
-Code for the EarthPod Mini environmental sensor pod.
+Code for the [EarthPod Mini](https://twitter.com/ASU_GDCS/status/1277711451856211975) environmental sensor pod.
 
 ## Hardware
 
@@ -17,11 +17,11 @@ Board.
 
 ### enviro_logging_wind.py
 
-This program adds functionality for reading wind speed using the sensor from a handheld anemometer.
+This program adds functionality for reading wind speed using the sensor from a [handheld anemometer](https://www.amazon.com/Anemometer-Velocity-Measurement-Thermometer-Windsurfing/dp/B01JOTJMU6/).
 
 ### enviro_logging_wind_airflow.py
 
-This program adds functionality for reading wind speed using a F662 Board Mount Airflow Sensor from Degree Controls.
+This program adds functionality for reading wind speed using a [F662 Board Mount Airflow Sensor](https://www.degreec.com/pages/f660-662) from Degree Controls.
 
 ## MagnetRelease
 
