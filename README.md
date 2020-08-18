@@ -1,5 +1,5 @@
-# EarthPod-Mini
-Code for the [EarthPod Mini](https://twitter.com/ASU_GDCS/status/1277711451856211975) environmental sensor pod.
+# EarthPod
+Code for the [EarthPod](https://twitter.com/ASU_GDCS/status/1277711451856211975) environmental sensor pod.
 
 
 ## Datalogging-Arduino
