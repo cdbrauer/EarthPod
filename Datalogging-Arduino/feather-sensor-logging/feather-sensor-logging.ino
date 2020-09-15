@@ -1,34 +1,35 @@
 #include "Wire.h"
 #include "SPI.h"
-#include "SdFat.h"
+#include "SD.h"
 #include "Adafruit_Sensor.h"
 #include "RTClib.h"
-// #include "Adafruit_FXAS21002C.h"
-// #include "Adafruit_FXOS8700.h"
+#include "Adafruit_FXAS21002C.h"
+#include "Adafruit_FXOS8700.h"
 #include "Adafruit_BME280.h"
-// #include "Adafruit_TCS34725.h"
+#include "Adafruit_TCS34725.h"
 #include "Adafruit_SI1145.h"
 
 #define CHIP_SELECT 4
 #define FILE_BASE_NAME "Data"
-#define error(msg) sd.errorHalt(F(msg))
+#define INTERRUPT_PIN 0
+#define ENABLE_PIN A5
 
 #define SEALEVELPRESSURE_HPA (1013.25)
-// #define HEADINGS "year,month,day,hour,minute,second,gyro x,gyro y,gyro z,accel x, accel y, accel z,mag x, mag y, mag z,temperature,pressure,altitude,humidity,r,g,b,vis,ir,uv"
-#define HEADINGS "year,month,day,hour,minute,second,temperature,pressure,altitude,humidity,vis,ir,uv"
+#define HEADINGS "year,month,day,hour,minute,second,time step,wind,gyro x,gyro y,gyro z,accel x,accel y,accel z,mag x,mag y,mag z,temperature,pressure,altitude,humidity,r,g,b,vis,ir,uv"
 #define SAMPLE_INTERVAL_MS 5000
 
-SdFat sd;
-SdFile file;
 RTC_DS3231 rtc;
-// Adafruit_FXAS21002C gyro = Adafruit_FXAS21002C(0x0021002C);
-// Adafruit_FXOS8700 accelmag = Adafruit_FXOS8700(0x8700A, 0x8700B);
+Adafruit_FXAS21002C gyro = Adafruit_FXAS21002C(0x0021002C);
+Adafruit_FXOS8700 accelmag = Adafruit_FXOS8700(0x8700A, 0x8700B);
 Adafruit_BME280 bme;
-// Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_700MS, TCS34725_GAIN_1X);
+Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_700MS, TCS34725_GAIN_1X);
 Adafruit_SI1145 uv = Adafruit_SI1145();
 
 const uint8_t BASE_NAME_SIZE = sizeof(FILE_BASE_NAME) - 1;
-char fileName[13] = FILE_BASE_NAME "00.csv";
+char filename[13] = FILE_BASE_NAME "00.csv";
+
+double t0 = 0;
+long counter = 0;
 
 void setup() {  
   Serial.begin(9600);
@@ -38,30 +39,30 @@ void setup() {
   }
 
   // Initialize the SD card ///////////////////////////////////////////////////////////////
-  // Initialize at the highest speed supported by the board that is
-  // not over 50 MHz. Try a lower speed if SPI errors occur.
-  if (!sd.begin(CHIP_SELECT, SD_SCK_MHZ(50))) {
-    sd.initErrorHalt();
+  if (!SD.begin(CHIP_SELECT)) {
+    Serial.println("Card failed, or not present");
+    // don't do anything more:
+    while (1);
   }
+  Serial.println("Card initialized");
 
   // Find an unused file name.
   if (BASE_NAME_SIZE > 6) {
-    error("FILE_BASE_NAME too long");
+    Serial.println("FILE_BASE_NAME too long");
   }
-  while (sd.exists(fileName)) {
-    if (fileName[BASE_NAME_SIZE + 1] != '9') {
-      fileName[BASE_NAME_SIZE + 1]++;
-    } else if (fileName[BASE_NAME_SIZE] != '9') {
-      fileName[BASE_NAME_SIZE + 1] = '0';
-      fileName[BASE_NAME_SIZE]++;
+  while (SD.exists(filename)) {
+    if (filename[BASE_NAME_SIZE + 1] != '9') {
+      filename[BASE_NAME_SIZE + 1]++;
+    } else if (filename[BASE_NAME_SIZE] != '9') {
+      filename[BASE_NAME_SIZE + 1] = '0';
+      filename[BASE_NAME_SIZE]++;
     } else {
-      error("Can't create file name");
+      Serial.println("Can't create file name");
     }
   }
-  if (!file.open(fileName, O_WRONLY | O_CREAT | O_EXCL)) {error("open");}
 
   Serial.print(F("Logging to: "));
-  Serial.println(fileName);
+  Serial.println(filename);
 
   // Initialize sensors ///////////////////////////////////////////////////////////////////
   if (! rtc.begin()) {
@@ -75,7 +76,7 @@ void setup() {
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
 
-  /*if (!gyro.begin()) {
+  if (!gyro.begin()) {
     Serial.println("No FXAS21002C found");
     while(1);
   }
@@ -83,7 +84,7 @@ void setup() {
   if (!accelmag.begin(ACCEL_RANGE_4G)) {
     Serial.println("No FXOS8700 found");
     while(1);
-  }*/
+  }
 
   if (!bme.begin()) {
     Serial.println("No BME280 found");
@@ -91,22 +92,39 @@ void setup() {
     while(1);
   }
 
-  /*if (!tcs.begin()) {
+  if (!tcs.begin()) {
     Serial.println("No TCS34725 found");
     while(1);
-  }*/
+  }
 
   if (!uv.begin()) {
     Serial.println("No Si1145 found");
     while(1);
   }
+
+  // Start anemometer /////////////////////////////////////////////////////////////////////
+  pinMode(ENABLE_PIN, INPUT);
+  delay(5000);  
+  pinMode(ENABLE_PIN, OUTPUT);
+  digitalWrite(ENABLE_PIN, LOW);
+  delay(3000);
+  pinMode(ENABLE_PIN, INPUT);
   
+  pinMode(INTERRUPT_PIN, INPUT);
+  attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), increment_counter, RISING);
+
+  // Create file //////////////////////////////////////////////////////////////////////////
+  File file = SD.open(filename, FILE_WRITE);  
   file.println(HEADINGS);
-  if (!file.close()) error("close");
+  file.close();
+
+  // Get start time ///////////////////////////////////////////////////////////////////////
+  t0 = millis();
 }
 
 void loop() {
-  if (!file.open(fileName, O_CREAT | O_APPEND | O_WRITE)) error("open");
+  File file = SD.open(filename, FILE_WRITE);
+  file.seek(EOF);
 
   Serial.println("===================");
   
@@ -140,33 +158,46 @@ void loop() {
   file.print(String(now.second()));
   file.print(",");
 
+  // Time step
+  double ts = (millis() - t0)/1000.0;
+  Serial.print("Time Step  ");
+  Serial.println(String(ts));
+  file.print(String(ts));
+  file.print(",");
+  t0 = millis();
+
+  // Wind speed
+  file.print(String((counter/ts)*0.053));
+  file.print(",");
+  counter = 0;
+
   // Gyro
-  /*sensors_event_t event;
+  sensors_event_t event;
   gyro.getEvent(&event);
   file.print(String(event.gyro.x));
   file.print(",");
   file.print(String(event.gyro.y));
   file.print(",");
   file.print(String(event.gyro.z));
-  file.print(",");*/
+  file.print(",");
 
   // Accelerometer
-  /*sensors_event_t aevent, mevent;
+  sensors_event_t aevent, mevent;
   accelmag.getEvent(&aevent, &mevent);
   file.print(String(aevent.acceleration.x));
   file.print(",");
   file.print(String(aevent.acceleration.y));
   file.print(",");
   file.print(String(aevent.acceleration.z));
-  file.print(",");*/
+  file.print(",");
 
   // Magnetometer
-  /*file.print(String(mevent.magnetic.x));
+  file.print(String(mevent.magnetic.x));
   file.print(",");
   file.print(String(mevent.magnetic.y));
   file.print(",");
   file.print(String(mevent.magnetic.z));
-  file.print(",");*/
+  file.print(",");
 
   // Air Pressure/temperature/humidity
   file.print(String(bme.readTemperature()));
@@ -179,7 +210,7 @@ void loop() {
   file.print(",");
 
   // Color (wind direction)
-  /*uint16_t r, g, b, c, colorTemp, lux;
+  uint16_t r, g, b, c, colorTemp, lux;
   tcs.setInterrupt(0);
   tcs.getRawData(&r, &g, &b, &c);
   colorTemp = tcs.calculateColorTemperature_dn40(r, g, b, c);
@@ -190,7 +221,7 @@ void loop() {
   file.print(String(g));
   file.print(",");
   file.print(String(b));
-  file.print(",");*/
+  file.print(",");
   
   // Light
   file.print(String(uv.readVisible()));
@@ -202,9 +233,12 @@ void loop() {
   file.print(String(UVindex));
   
   file.println();
-  if (!file.sync() || file.getWriteError()) {error("write");}
-  if (!file.close()) error("close");
+  file.close();
 
   Serial.println();
   delay(SAMPLE_INTERVAL_MS);
+}
+
+void increment_counter() {
+  counter++;
 }
