@@ -33,10 +33,6 @@ long counter = 0;
 
 void setup() {  
   Serial.begin(9600);
-  
-  while (!Serial) {
-    delay(1);
-  }
 
   // Initialize the SD card ///////////////////////////////////////////////////////////////
   if (!SD.begin(CHIP_SELECT)) {
