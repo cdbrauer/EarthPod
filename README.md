@@ -19,14 +19,13 @@ The code in this folder is intended to be used in a sensor pod based on a Adafru
 
 This program will initialize all sensors and print readings to the serial terminal
 
-### feather-all-i2c-logging-2.ino
-
-This program will create a .csv file on the Adalogger's SD card that records the measurements captured by the sensors. Some sections are currently commented out so that the program can be tested on an Adafruit Feather 32u4 Adalogger.
-
 ### feather-anemometer.ino
 
 Test initialization and interrupts for a wind speed sensor from a [handheld anemometer](https://www.amazon.com/Anemometer-Velocity-Measurement-Thermometer-Windsurfing/dp/B01JOTJMU6/).
 
+### feather-sensor-logging.ino
+
+This program will create a .csv file on the Adalogger's SD card that records the measurements captured by the sensors. This program is only compatible with the Adafruit Feather M0 Adalogger, and will not fit on the Adafruit Feather 32u4 Adalogger due to memory constraints.
 
 ## Datalogging-Python
 
