@@ -12,13 +12,16 @@
 // Settings
 #define SAMPLE_INTERVAL_MS 60000
 #define FILE_BASE_NAME "Data"
-#define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Light,Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (SPL06-007),Accel X,Accel Y,Accel Z,Mag X,Mag Y,Mag Z"
-// #define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Light,Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (SPL06-007),Accel X,Accel Y,Accel Z,Mag X,Mag Y,Mag Z,Gyro X,Gyro Y,Gyro Z"
+#define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Light,Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (SPL06-007),Accel X,Accel Y,Accel Z,Mag X,Mag Y,Mag Z,Battery"
+// #define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Light,Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (SPL06-007),Accel X,Accel Y,Accel Z,Mag X,Mag Y,Mag Z,Gyro X,Gyro Y,Gyro Z,Battery"
+#define VBATPIN A7
+#define LOWBATTERY 3.5
 
 // SD card settings
 #define CHIP_SELECT 4
 #define INTERRUPT_PIN 0
 #define ENABLE_PIN A5
+bool sd_present = true;
 
 // Pressure sensor addresses
 const int  SPL06_007_I2C = 0x77;    // I2C Address for the temperature sensor
@@ -112,10 +115,10 @@ void setup() {
   // Initialize the SD card ///////////////////////////////////////////////////////////////
   if (!SD.begin(CHIP_SELECT)) {
     Serial.println("Card failed, or not present");
-    // don't do anything more:
-    while(1){blink_led();}
+    sd_present = false;
+  } else {
+    Serial.println("Card initialized");
   }
-  Serial.println("Card initialized");
 
   // Find an unused file name.
   if (BASE_NAME_SIZE > 6) {
@@ -139,7 +142,7 @@ void setup() {
   if (! rtc.begin()) {
     Serial.println("No RTC found");
     Serial.flush();
-    abort();
+    while(1){blink_led();}
   }
 
   if (rtc.lostPower()) {
@@ -174,14 +177,7 @@ void setup() {
 }
 
 void loop() {
-  File file = SD.open(filename, FILE_WRITE);
-  file.seek(EOF);
-
   Serial.println("===================");
-
-  // Trial number
-  file.print(String(counter));
-  file.print(",");
   
   // RTC
   DateTime now = rtc.now();
@@ -198,53 +194,29 @@ void loop() {
   Serial.print(':');
   Serial.print(now.second(), DEC);
   Serial.println();
-  
-  // RTC
-  file.print(String(now.year()));
-  file.print(",");
-  file.print(String(now.month()));
-  file.print(",");
-  file.print(String(now.day()));
-  file.print(",");
-  file.print(String(now.hour()));
-  file.print(",");
-  file.print(String(now.minute()));
-  file.print(",");
-  file.print(String(now.second()));
-  file.print(",");
 
   // Time step
   double ts = (millis() - t0)/1000.0;
+  t0 = millis();
   Serial.print("Time Step: ");
   Serial.println(String(ts));
-  file.print(String(ts));
-  file.print(",");
-  t0 = millis();
 
   // Light level
   float lux = lightMeter.readLightLevel();
   Serial.print("Light: ");
   Serial.println(lux);
-  file.print(String(lux));
-  file.print(",");
 
   // Humidity
   float rh = SHT2x.GetHumidity();
   Serial.print("Humidity(%RH): ");
   Serial.println(rh);
-  file.print(String(rh));
-  file.print(",");
 
   // Pressure and altitude
   read_SPL06_007();
   Serial.print("Pressure: ");
-  Serial.print(spl06_pressure, DEC);
-  Serial.print(", Altitude: ");
+  Serial.println(spl06_pressure, DEC);
+  Serial.print("Altitude: ");
   Serial.println(spl06_altitude, DEC);
-  file.print(String(spl06_pressure));
-  file.print(",");
-  file.print(String(spl06_altitude));
-  file.print(",");
 
   // Temperature
   float temp_ds3231 = rtc.getTemperature();
@@ -256,46 +228,111 @@ void loop() {
   Serial.println(temp_sht21);
   Serial.print("     SPL06: ");
   Serial.println(spl06_temperature);
-  file.print(String(temp_ds3231));
-  file.print(",");
-  file.print(String(temp_sht21));
-  file.print(",");
-  file.print(String(spl06_temperature));
-  file.print(",");
 
-  // Accelerometer
-  sensors_event_t aevent, mevent;
-  accelmag.getEvent(&aevent, &mevent);
-  file.print(String(aevent.acceleration.x));
-  file.print(",");
-  file.print(String(aevent.acceleration.y));
-  file.print(",");
-  file.print(String(aevent.acceleration.z));
-  file.print(",");
-
-  // Magnetometer
-  file.print(String(mevent.magnetic.x));
-  file.print(",");
-  file.print(String(mevent.magnetic.y));
-  file.print(",");
-  file.print(String(mevent.magnetic.z));
-  /* file.print(",");
-
-  // Gyro
-  sensors_event_t event;
-  gyro.getEvent(&event);
-  file.print(String(event.gyro.x));
-  file.print(",");
-  file.print(String(event.gyro.y));
-  file.print(",");
-  file.print(String(event.gyro.z)); */
+  // Battery Voltage
+  float measuredvbat = analogRead(VBATPIN);
+  measuredvbat *= 2;    // we divided by 2, so multiply back
+  measuredvbat *= 3.3;  // Multiply by 3.3V, our reference voltage
+  measuredvbat /= 1024; // convert to voltage
+  Serial.print("Battery Voltage: " );
+  Serial.println(measuredvbat);
   
-  file.println();
-  file.close();
+  if(sd_present){
+    File file = SD.open(filename, FILE_WRITE);
+    file.seek(EOF);
+
+    // Trial number
+    file.print(String(counter));
+    file.print(",");
+
+    // RTC
+    file.print(String(now.year()));
+    file.print(",");
+    file.print(String(now.month()));
+    file.print(",");
+    file.print(String(now.day()));
+    file.print(",");
+    file.print(String(now.hour()));
+    file.print(",");
+    file.print(String(now.minute()));
+    file.print(",");
+    file.print(String(now.second()));
+    file.print(",");
+
+    // Time Step
+    file.print(String(ts));
+    file.print(",");
+
+    // Light Level
+    file.print(String(lux));
+    file.print(",");
+
+    // Humidity
+    file.print(String(rh));
+    file.print(",");
+
+    // Pressure and Altitude
+    file.print(String(spl06_pressure));
+    file.print(",");
+    file.print(String(spl06_altitude));
+    file.print(",");
+
+    // Temperature
+    file.print(String(temp_ds3231));
+    file.print(",");
+    file.print(String(temp_sht21));
+    file.print(",");
+    file.print(String(spl06_temperature));
+    file.print(",");
+
+    // Accelerometer
+    sensors_event_t aevent, mevent;
+    accelmag.getEvent(&aevent, &mevent);
+    file.print(String(aevent.acceleration.x));
+    file.print(",");
+    file.print(String(aevent.acceleration.y));
+    file.print(",");
+    file.print(String(aevent.acceleration.z));
+    file.print(",");
+  
+    // Magnetometer
+    file.print(String(mevent.magnetic.x));
+    file.print(",");
+    file.print(String(mevent.magnetic.y));
+    file.print(",");
+    file.print(String(mevent.magnetic.z));
+    file.print(",");
+  
+    // Gyro
+    /*sensors_event_t event;
+    gyro.getEvent(&event);
+    file.print(String(event.gyro.x));
+    file.print(",");
+    file.print(String(event.gyro.y));
+    file.print(",");
+    file.print(String(event.gyro.z));
+    file.print(",");*/
+
+    // Battery Voltage
+    file.print(String(measuredvbat));
+    
+    file.println();
+    file.close();
+  }
 
   Serial.println();
   counter++;
-  delay(SAMPLE_INTERVAL_MS);
+
+  while((millis() - t0) < SAMPLE_INTERVAL_MS){
+    if(measuredvbat <= LOWBATTERY){
+      digitalWrite(LED_BUILTIN, HIGH); // turn the LED on
+      delay(1000);
+    } else if(sd_present){
+      delay(1000);
+    } else {
+      blink_led();
+    }
+  }
 }
 
 void blink_led() {
