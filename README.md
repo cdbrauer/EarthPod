@@ -8,24 +8,38 @@ Code for the [EarthPod](https://twitter.com/ASU_GDCS/status/1277711451856211975)
 
 The code in this folder is intended to be used in a sensor pod based on a Adafruit Feather M0 Adalogger. Connected sensors include:
 
-- DS3231 RTC
-- FXAS21002C Gyroscope
-- FXOS8700 Acclerometer/Magnetometer
-- BME280 Air Pressure/Temperature/Humidity Sensor
-- TCS34725 Color Sensor (for determining wind direction)
-- SI1145 Light/UV Index Sensor
+| Sensor | [V1](https://github.com/cdbrauer/EarthPod/tree/master/Datalogging-Arduino/feather-sensor-logging) | [V2](https://github.com/cdbrauer/EarthPod/tree/master/Datalogging-Arduino/feather-sensor-logging-v2) |
+| :------------- | :----------: | :-----------: |
+| RTC | DS3231 | DS3231 |
+| Gyroscope | FXAS21002C | FXAS21002C |
+| Acclerometer/Magnetometer | FXOS8700 | FXOS8700 |
+| Temperature/Humidity | si7021 | SHT21 |
+| Air Pressure/Temperature | BME280 | SPL06-007 |
+| Light Level | SI1145 | BH1750 |
+| Wind Direction | TCS34725 | N/A |
+| Wind Speed | Handheld Anemometer | N/A |
+
+### feather-sensor-logging.ino
+
+*Compatible with V1 only*
+
+This program will create a .csv file on the Adalogger's SD card that records the measurements captured by the sensors. This program is only compatible with the Adafruit Feather M0 Adalogger, and will not fit on the Adafruit Feather 32u4 Adalogger due to memory constraints.
+
+### feather-sensor-logging-v2.ino
+
+*Compatible with V2 Only*
+
+This program will create a .csv file on the Adalogger's SD card that records the measurements captured by the sensors. This program is only compatible with the Adafruit Feather M0 Adalogger, and will not fit on the Adafruit Feather 32u4 Adalogger due to memory constraints.
 
 ### feather-all-i2c.ino
+
+*Compatible with V1 only*
 
 This program will initialize all sensors and print readings to the serial terminal
 
 ### feather-anemometer.ino
 
 Test initialization and interrupts for a wind speed sensor from a [handheld anemometer](https://www.amazon.com/Anemometer-Velocity-Measurement-Thermometer-Windsurfing/dp/B01JOTJMU6/).
-
-### feather-sensor-logging.ino
-
-This program will create a .csv file on the Adalogger's SD card that records the measurements captured by the sensors. This program is only compatible with the Adafruit Feather M0 Adalogger, and will not fit on the Adafruit Feather 32u4 Adalogger due to memory constraints.
 
 ## Datalogging-Python
 
