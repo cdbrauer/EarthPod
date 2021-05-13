@@ -6,6 +6,12 @@
 #include "SHT2x.h"                   // Humidity and temperature
 // SPL06-007 is manually accessed    // Air pressure, altitude, and temperature
 
+// Function prototypes
+void blink_led(uint16_t delayTime = 500);
+void enable_led(uint16_t delayTime = 1000);
+void init_SPL06_007(void);
+void read_SPL06_007(void);
+
 // Settings
 #define SAMPLE_INTERVAL_MS 60000
 #define FILE_BASE_NAME "Data"
@@ -305,28 +311,28 @@ void loop() {
   counter++;
 
   while((millis() - t0) < SAMPLE_INTERVAL_MS){
-    if (!sd_present) {
-      enable_led();
+    if (measuredvbat <= LOWBATTERY) {
+      blink_led(); // If the battery is low, make the status led blink
+    } else if (!sd_present) {
+      blink_led(100); // If the SD card is missing or failed to initialize, make the status led blink quickly
     } else if (!SPL06_present) {
-      enable_led();
-    } else if (measuredvbat <= LOWBATTERY) {
-      blink_led();
+      enable_led(); // If the pressure sensor is missing or failed to initialize, turn the status led on
     } else {
       delay(1000);
     }
   }
 }
 
-void enable_led() {
+void blink_led(uint16_t delayTime) {
   digitalWrite(LED_BUILTIN, HIGH); // turn the LED on
-  delay(1000);
+  delay(delayTime);
+  digitalWrite(LED_BUILTIN, LOW);  // turn the LED off
+  delay(delayTime);
 }
 
-void blink_led() {
+void enable_led(uint16_t delayTime) {
   digitalWrite(LED_BUILTIN, HIGH); // turn the LED on
-  delay(500);
-  digitalWrite(LED_BUILTIN, LOW);  // turn the LED off
-  delay(500);
+  delay(delayTime);
 }
 
 void init_SPL06_007() {
