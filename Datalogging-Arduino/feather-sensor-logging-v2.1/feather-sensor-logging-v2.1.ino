@@ -4,7 +4,8 @@
 #include "Adafruit_Sensor.h"
 #include "RTClib.h"                  // RTC
 #include "SHT2x.h"                   // Humidity and temperature
-// SPL06-007 is manually accessed    // Air pressure, altitude, and temperature
+#include "Adafruit_BMP280.h"         // Air pressure, altitude, and temperature
+// SPL06-007 is manually accessed if used
 
 // Function prototypes
 void blink_led(uint16_t delayTime = 500);
@@ -24,6 +25,10 @@ void read_SPL06_007(void);
 #define CHIP_SELECT A5
 bool sd_present = true;
 
+// Pressure sensor status
+bool BMP280_present = true;
+bool SPL06_present = false;
+
 // Pressure sensor addresses
 const int  SPL06_007_I2C = 0x77;    // I2C Address for the temperature sensor
 const byte REG_PSR       = 0x00;    // Register Address: Pressure Value (3 bytes)
@@ -34,7 +39,6 @@ const byte REG_MEAS_CFG  = 0x08;    // Register Address: Measurement configurati
 const byte REG_CFG       = 0x09;    // Register Address: Interrupt and FIFO configuration (1 byte)
 const byte REG_ID        = 0x0D;    // Register Address: Device ID (1 byte)
 const byte REG_COEF      = 0x10;    // Register Address: Calibration coefficients (18 bytes)
-bool SPL06_present = true;
 
 // Pressure sensor calibration coefficients
 int16_t c0, c1;
@@ -90,9 +94,9 @@ const float R  = 287.05f;               // ideal gas constant in J/kg/K
 const float msl_pressure = 101325.0f;   // in Pa
 
 // Pressure sensor results
-float spl06_temperature = 25;
-float spl06_pressure = 101325;
-float spl06_altitude = 0;
+float bmp_spl_temperature = 25;
+float bmp_spl_pressure = 101325;
+float bmp_spl_altitude = 0;
 
 // File variables
 const uint8_t BASE_NAME_SIZE = sizeof(FILE_BASE_NAME) - 1;
@@ -105,6 +109,7 @@ float measuredvbat;
 
 // Create sensor objects
 RTC_DS3231 rtc;
+Adafruit_BMP280 bmp;
 
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
@@ -162,7 +167,7 @@ void setup() {
   }
 
   // Initialize sensors ///////////////////////////////////////////////////////////////////
-  if (! rtc.begin()) {
+  if (!rtc.begin()) {
     Serial.println("No RTC found");
     Serial.flush();
     while(1){enable_led();}
@@ -173,7 +178,19 @@ void setup() {
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
 
-  init_SPL06_007();
+  if (!bmp.begin(0x76)) {
+    Serial.println("BMP280 not found, looking for SPL06_007");
+    BMP280_present = false;
+    SPL06_present = true;
+    init_SPL06_007();
+  } else {
+    /* Default settings from datasheet. */
+    bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Operating Mode. */
+                    Adafruit_BMP280::SAMPLING_X2,     /* Temp. oversampling */
+                    Adafruit_BMP280::SAMPLING_X16,    /* Pressure oversampling */
+                    Adafruit_BMP280::FILTER_X16,      /* Filtering. */
+                    Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
+  }
 
   // Create file //////////////////////////////////////////////////////////////////////////  
   if (sd_present) {
@@ -217,13 +234,13 @@ void loop() {
   Serial.println(rh);
 
   // Pressure and altitude
-  if (SPL06_present) {
+  if (BMP280_present) {
+    bmp_spl_temperature = bmp.readTemperature();
+    bmp_spl_pressure = bmp.readPressure();
+    bmp_spl_altitude = bmp.readAltitude(1013.25);
+  } else if (SPL06_present) {
     read_SPL06_007();
-    Serial.print("Pressure: ");
-    Serial.println(spl06_pressure, DEC);
-    Serial.print("Altitude: ");
-    Serial.println(spl06_altitude, DEC);
-  }
+  }  
 
   // Temperature
   float temp_ds3231 = rtc.getTemperature();
@@ -233,10 +250,15 @@ void loop() {
   Serial.println(temp_ds3231);
   Serial.print("     SHT21: ");
   Serial.println(temp_sht21);
-  
-  if (SPL06_present) {
-    Serial.print("     SPL06: ");
-    Serial.println(spl06_temperature);
+
+  if (BMP280_present || SPL06_present) {
+    Serial.print("     BMP280/SPL06: ");
+    Serial.println(bmp_spl_temperature);
+    
+    Serial.print("Pressure: ");
+    Serial.println(bmp_spl_pressure, DEC);
+    Serial.print("Altitude: ");
+    Serial.println(bmp_spl_altitude, DEC);
   }
 
   // Battery Voltage
@@ -278,10 +300,10 @@ void loop() {
     file.print(",");
 
     // Pressure and Altitude
-    if (SPL06_present) {
-      file.print(String(spl06_pressure));
+    if (BMP280_present || SPL06_present) {
+      file.print(String(bmp_spl_pressure));
       file.print(",");
-      file.print(String(spl06_altitude));
+      file.print(String(bmp_spl_altitude));
       file.print(",");
     } else {
       file.print(",,");
@@ -293,8 +315,8 @@ void loop() {
     file.print(String(temp_sht21));
     file.print(",");
 
-    if (SPL06_present) {
-      file.print(String(spl06_temperature));
+    if (BMP280_present || SPL06_present) {
+      file.print(String(bmp_spl_temperature));
       file.print(",");
     } else {
       file.print(",");
@@ -521,7 +543,7 @@ void read_SPL06_007() {
   tmp_raw = (tmp_raw & 1 << 23) ? (0xff000000 | tmp_raw) : tmp_raw;
 
   float ftsc = (float)tmp_raw / kt;
-  spl06_temperature = (float)c0 * 0.5f + (float)c1 * ftsc;
+  bmp_spl_temperature = (float)c0 * 0.5f + (float)c1 * ftsc;
 
   // Read pressure
   Wire.beginTransmission (SPL06_007_I2C);
@@ -541,9 +563,9 @@ void read_SPL06_007() {
   float qua2 = (float)c10 + fpsc * ((float)c20 + fpsc * (float)c30);
   float qua3 = ftsc * fpsc * ((float)c11 + fpsc * (float)c21);
   float fp = (float)c00 + fpsc * qua2 + ftsc * (float)c01 + qua3;
-  spl06_pressure = fp;
+  bmp_spl_pressure = fp;
 
   // Calculate altitude
   float pK = fp / msl_pressure;
-  spl06_altitude = (((powf(pK, (-(a * R) / g))) * T1) - T1) / a;
+  bmp_spl_altitude = (((powf(pK, (-(a * R) / g))) * T1) - T1) / a;
 }
