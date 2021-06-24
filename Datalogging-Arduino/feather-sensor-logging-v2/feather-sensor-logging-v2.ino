@@ -9,13 +9,20 @@
 #include "Adafruit_FXOS8700.h"       // Accelerometer and magnetometer
 // #include "Adafruit_FXAS21002C.h"  // Gyroscope
 
+// Function prototypes
+void blink_led(uint16_t delayTime = 500);
+void enable_led(uint16_t delayTime = 1000);
+void init_SPL06_007(void);
+void read_SPL06_007(void);
+
 // Settings
+#define FORCE_RTC false
 #define SAMPLE_INTERVAL_MS 60000
 #define FILE_BASE_NAME "Data"
 #define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Light,Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (SPL06-007),Accel X,Accel Y,Accel Z,Mag X,Mag Y,Mag Z,Battery"
 // #define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Light,Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (SPL06-007),Accel X,Accel Y,Accel Z,Mag X,Mag Y,Mag Z,Gyro X,Gyro Y,Gyro Z,Battery"
 #define VBATPIN A7
-#define LOWBATTERY 3.5
+#define LOWBATTERY 3.6
 
 // SD card settings
 #define CHIP_SELECT 4
@@ -98,6 +105,9 @@ char filename[13] = FILE_BASE_NAME "00.csv";
 double t0 = 0;
 double counter = 0;
 
+// Battery voltage variable
+float measuredvbat;
+
 // Create sensor objects
 RTC_DS3231 rtc;
 BH1750 lightMeter;
@@ -111,6 +121,20 @@ void setup() {
   Wire.begin();
   Serial.begin(9600);
   delay(2000);
+
+  // Check the Battery Voltage ////////////////////////////////////////////////////////////
+  measuredvbat = analogRead(VBATPIN);
+  measuredvbat *= 2;    // we divided by 2, so multiply back
+  measuredvbat *= 3.3;  // Multiply by 3.3V, our reference voltage
+  measuredvbat /= 1024; // convert to voltage
+  Serial.print("Battery Voltage: " );
+  Serial.println(measuredvbat);
+
+  if (measuredvbat <= LOWBATTERY) {
+    digitalWrite(LED_BUILTIN, HIGH); // turn the LED on
+    Serial.println("Low battery, halting");
+    while(1){blink_led();}
+  }
 
   // Initialize the SD card ///////////////////////////////////////////////////////////////
   if (!SD.begin(CHIP_SELECT)) {
@@ -142,24 +166,24 @@ void setup() {
   if (! rtc.begin()) {
     Serial.println("No RTC found");
     Serial.flush();
-    while(1){blink_led();}
+    while(1){enable_led();}
   }
 
-  if (rtc.lostPower()) {
+  if (rtc.lostPower() || FORCE_RTC) {
     Serial.println("RTC lost power, setting time");
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
 
   if (!lightMeter.begin()) {
     Serial.println("No BH1750 found");
-    while(1){blink_led();}
+    while(1){enable_led();}
   }
 
   init_SPL06_007();
 
   if (!accelmag.begin(ACCEL_RANGE_4G)) {
     Serial.println("No FXOS8700 found");
-    while(1){blink_led();}
+    while(1){enable_led();}
   }
 
   /*if (!gyro.begin()) {
@@ -325,21 +349,25 @@ void loop() {
 
   while((millis() - t0) < SAMPLE_INTERVAL_MS){
     if(measuredvbat <= LOWBATTERY){
-      digitalWrite(LED_BUILTIN, HIGH); // turn the LED on
-      delay(1000);
-    } else if(sd_present){
-      delay(1000);
+      blink_led(); // If the battery is low, make the status led blink
+    } else if(!sd_present){
+      blink_led(100); // If the SD card is missing or failed to initialize, make the status led blink quickly
     } else {
-      blink_led();
+      delay(1000);
     }
   }
 }
 
-void blink_led() {
+void blink_led(uint16_t delayTime) {
   digitalWrite(LED_BUILTIN, HIGH); // turn the LED on
-  delay(500);
+  delay(delayTime);
   digitalWrite(LED_BUILTIN, LOW);  // turn the LED off
-  delay(500);
+  delay(delayTime);
+}
+
+void enable_led(uint16_t delayTime) {
+  digitalWrite(LED_BUILTIN, HIGH); // turn the LED on
+  delay(delayTime);
 }
 
 void init_SPL06_007() {
