@@ -1,3 +1,4 @@
+#include "Arduino.h"
 #include "Wire.h"
 #include "SPI.h"
 #include "SD.h"
@@ -8,22 +9,23 @@
 // SPL06-007 is manually accessed if used
 
 // Function prototypes
-void blink_led(uint16_t delayTime = 500);
-void enable_led(uint16_t delayTime = 1000);
+void blink_led(uint16_t delayTime = 500); // Warning - sensor malfunction, low battery
+void enable_led(uint16_t delayTime = 1000); // Logging halted - dead battery, no SD card, no RTC
+void log_info(String msg);
 void init_SPL06_007(void);
 void read_SPL06_007(void);
 
 // Settings
 #define SAMPLE_INTERVAL_MS 60000
 #define FILE_BASE_NAME "Data"
-#define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (SPL06-007),Battery"
+#define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (BMP280/SPL06),Battery"
 #define VBATPIN A7
 #define LOWBATTERY 3.6
 
 // SD card settings
 #define CHIP_DETECT A4
 #define CHIP_SELECT A5
-bool sd_present = true;
+bool sd_present = false;
 
 // Pressure sensor status
 bool BMP280_present = true;
@@ -101,6 +103,9 @@ float bmp_spl_altitude = 0;
 // File variables
 const uint8_t BASE_NAME_SIZE = sizeof(FILE_BASE_NAME) - 1;
 char filename[13] = FILE_BASE_NAME "00.csv";
+char logfilename[8] = "log.txt";
+
+// Measurement time and number
 double t0 = 0;
 double counter = 0;
 
@@ -117,7 +122,7 @@ void setup() {
   
   Wire.begin();
   Serial.begin(9600);
-  delay(2000);
+  delay(2000);  
   
   // Check the Battery Voltage ////////////////////////////////////////////////////////////
   measuredvbat = analogRead(VBATPIN);
@@ -128,58 +133,46 @@ void setup() {
   Serial.println(measuredvbat);
 
   if (measuredvbat <= LOWBATTERY) {
-    digitalWrite(LED_BUILTIN, HIGH); // turn the LED on
-    Serial.println("Low battery, halting");
-    while(1){blink_led();}
+    log_info("Low battery, halting");
+    Serial.flush();
+    while(1){enable_led();}
   }
 
   // Initialize the SD card ///////////////////////////////////////////////////////////////  
   pinMode(CHIP_DETECT, INPUT);
   if (!digitalRead(CHIP_DETECT)) {
-    Serial.println("Card not present");
     sd_present = false;
+    log_info("SD card not present");
   } else if (!SD.begin(CHIP_SELECT)) {
-    Serial.println("Card failed");
     sd_present = false;
+    log_info("SD card failed");
   } else {
-    Serial.println("Card initialized");
-  }
-
-  if (sd_present) {
-    // Find an unused file name.
-    if (BASE_NAME_SIZE > 6) {
-      Serial.println("FILE_BASE_NAME too long");
-    }
-    while (SD.exists(filename)) {
-      if (filename[BASE_NAME_SIZE + 1] != '9') {
-        filename[BASE_NAME_SIZE + 1]++;
-      } else if (filename[BASE_NAME_SIZE] != '9') {
-        filename[BASE_NAME_SIZE + 1] = '0';
-        filename[BASE_NAME_SIZE]++;
-      } else {
-        Serial.println("Can't create file name");
-        sd_present = false;
-      }
-    }
-  
-    Serial.print(F("Logging to: "));
-    Serial.println(filename);
+    sd_present = true;
+    log_info("------");
+    log_info("SD card initialized");
   }
 
   // Initialize sensors ///////////////////////////////////////////////////////////////////
   if (!rtc.begin()) {
-    Serial.println("No RTC found");
+    log_info("RTC not found, halting");
     Serial.flush();
     while(1){enable_led();}
   }
 
   if (rtc.lostPower()) {
-    Serial.println("RTC lost power, setting time");
+    log_info("RTC lost power, setting time");
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
 
+  char dt[16];
+  char tm[16];
+  DateTime now = rtc.now();
+  sprintf(dt, "%02d/%02d/%02d", now.year(),now.month(),now.day());
+  sprintf(tm, "%02d:%02d:%02d", now.hour(),now.minute(),now.second());
+  log_info(dt);
+  log_info(tm);
+
   if (!bmp.begin(0x76)) {
-    Serial.println("BMP280 not found, looking for SPL06_007");
     BMP280_present = false;
     SPL06_present = true;
     init_SPL06_007();
@@ -192,11 +185,39 @@ void setup() {
                     Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
   }
 
-  // Create file //////////////////////////////////////////////////////////////////////////  
+  if (BMP280_present) {
+    log_info("BMP280 connected");
+  } else if (SPL06_present) {
+    log_info("SPL06_007 connected");
+  } else {
+    log_info("Pressure sensor not found");
+  }
+
+  // Create sensor data file //////////////////////////////////////////////////////////////
+  if (sd_present) {
+    // Find an unused file name.
+    if (BASE_NAME_SIZE > 6) {
+      log_info("FILE_BASE_NAME too long");
+    }
+    while (SD.exists(filename)) {
+      if (filename[BASE_NAME_SIZE + 1] != '9') {
+        filename[BASE_NAME_SIZE + 1]++;
+      } else if (filename[BASE_NAME_SIZE] != '9') {
+        filename[BASE_NAME_SIZE + 1] = '0';
+        filename[BASE_NAME_SIZE]++;
+      } else {
+        log_info("Can't create file name");
+        sd_present = false;
+      }
+    }
+  }
+  
   if (sd_present) {
     File file = SD.open(filename, FILE_WRITE);  
     file.println(HEADINGS);
     file.close();
+    log_info("Sensor data file created");
+    log_info(filename);
   }
 
   // Get start time ///////////////////////////////////////////////////////////////////////
@@ -207,19 +228,16 @@ void loop() {
   Serial.println("===================");
   
   // RTC
+  char dt[16];
+  char tm[16];
   DateTime now = rtc.now();
-  Serial.print("RTC  ");
-  Serial.print(now.year(), DEC);
-  Serial.print('/');
-  Serial.print(now.month(), DEC);
-  Serial.print('/');
-  Serial.print(now.day(), DEC);
-  Serial.print(" ");
-  Serial.print(now.hour(), DEC);
-  Serial.print(':');
-  Serial.print(now.minute(), DEC);
-  Serial.print(':');
-  Serial.print(now.second(), DEC);
+  sprintf(dt, "%02d/%02d/%02d", now.year(),now.month(),now.day());
+  sprintf(tm, "%02d:%02d:%02d", now.hour(),now.minute(),now.second());
+  
+  Serial.print("RTC: ");
+  Serial.print(dt);
+  Serial.print(' ');
+  Serial.print(tm);
   Serial.println();
 
   // Time step
@@ -240,7 +258,7 @@ void loop() {
     bmp_spl_altitude = bmp.readAltitude(1013.25);
   } else if (SPL06_present) {
     read_SPL06_007();
-  }  
+  }
 
   // Temperature
   float temp_ds3231 = rtc.getTemperature();
@@ -253,8 +271,7 @@ void loop() {
 
   if (BMP280_present || SPL06_present) {
     Serial.print("     BMP280/SPL06: ");
-    Serial.println(bmp_spl_temperature);
-    
+    Serial.println(bmp_spl_temperature);    
     Serial.print("Pressure: ");
     Serial.println(bmp_spl_pressure, DEC);
     Serial.print("Altitude: ");
@@ -333,14 +350,28 @@ void loop() {
   counter++;
 
   while((millis() - t0) < SAMPLE_INTERVAL_MS){
-    if (measuredvbat <= LOWBATTERY) {
+    if (!sd_present) {
+      enable_led(); // If the SD card is missing or failed to initialize, turn the status led on
+    } else if (measuredvbat <= LOWBATTERY) {
       blink_led(); // If the battery is low, make the status led blink
-    } else if (!sd_present) {
-      blink_led(100); // If the SD card is missing or failed to initialize, make the status led blink quickly
-    } else if (!SPL06_present) {
-      enable_led(); // If the pressure sensor is missing or failed to initialize, turn the status led on
+    } else if ((!SPL06_present) && (!BMP280_present)) {
+      blink_led(); // If the pressure sensor is missing or failed to initialize, make the status led blink
     } else {
       delay(1000);
+    }
+
+    if (Serial.available() > 0) {
+      char receivedChar = Serial.read();
+      log_info("Clock reset requested, setting time");
+      rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+
+      char dt[16];
+      char tm[16];
+      DateTime now = rtc.now();
+      sprintf(dt, "%02d/%02d/%02d", now.year(),now.month(),now.day());
+      sprintf(tm, "%02d:%02d:%02d", now.hour(),now.minute(),now.second());
+      log_info(dt);
+      log_info(tm);
     }
   }
 }
@@ -355,6 +386,17 @@ void blink_led(uint16_t delayTime) {
 void enable_led(uint16_t delayTime) {
   digitalWrite(LED_BUILTIN, HIGH); // turn the LED on
   delay(delayTime);
+}
+
+void log_info(String msg) {
+  Serial.println(msg);
+  
+  if (sd_present) {
+    File logfile = SD.open(logfilename, FILE_WRITE);
+    logfile.seek(EOF);
+    logfile.println(msg);
+    logfile.close();
+  }
 }
 
 void init_SPL06_007() {
