@@ -4,6 +4,7 @@
 #include "SD.h"
 #include "Adafruit_Sensor.h"
 #include "RTClib.h"                  // RTC
+#include "BH1750.h"                  // Light level
 #include "SHT2x.h"                   // Humidity and temperature
 #include "Adafruit_BMP280.h"         // Air pressure, altitude, and temperature
 // SPL06-007 is manually accessed if used
@@ -18,14 +19,23 @@ void read_SPL06_007(void);
 // Settings
 #define SAMPLE_INTERVAL_MS 60000
 #define FILE_BASE_NAME "Data"
-#define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (BMP280/SPL06),Battery"
+#define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Light,Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (BMP280/SPL06),Battery"
 #define VBATPIN A7
 #define LOWBATTERY 3.6
 
 // SD card settings
+bool sd_present = false;
+
+// V1
+// #define CHIP_DETECT 7
+// #define CHIP_SELECT 4
+
+// V2
 #define CHIP_DETECT A4
 #define CHIP_SELECT A5
-bool sd_present = false;
+
+// Light sensor status
+bool BH1750_present = true;
 
 // Pressure sensor status
 bool BMP280_present = true;
@@ -95,6 +105,9 @@ const float g  = 9.80665f;              // gravity constant in m/s/s
 const float R  = 287.05f;               // ideal gas constant in J/kg/K
 const float msl_pressure = 101325.0f;   // in Pa
 
+// Light sensor results
+float lux = 0;
+
 // Pressure sensor results
 float bmp_spl_temperature = 25;
 float bmp_spl_pressure = 101325;
@@ -114,6 +127,7 @@ float measuredvbat;
 
 // Create sensor objects
 RTC_DS3231 rtc;
+BH1750 lightMeter;
 Adafruit_BMP280 bmp;
 
 void setup() {
@@ -143,7 +157,10 @@ void setup() {
   if (!digitalRead(CHIP_DETECT)) {
     sd_present = false;
     log_info("SD card not present");
-  } else if (!SD.begin(CHIP_SELECT)) {
+  }
+
+  // Try to initialize even if card is not detected
+  if (!SD.begin(CHIP_SELECT)) {
     sd_present = false;
     log_info("SD card failed");
   } else {
@@ -171,6 +188,13 @@ void setup() {
   sprintf(tm, "%02d:%02d:%02d", now.hour(),now.minute(),now.second());
   log_info(dt);
   log_info(tm);
+
+  if (lightMeter.begin()) {
+    log_info("BH1750 connected");
+  } else {
+    BH1750_present = false;
+    log_info("Light sensor not found");
+  }
 
   if (!bmp.begin(0x76)) {
     BMP280_present = false;
@@ -246,6 +270,13 @@ void loop() {
   Serial.print("Time Step: ");
   Serial.println(String(ts));
 
+  // Light level
+  if (BH1750_present) {
+    lux = lightMeter.readLightLevel();
+    Serial.print("Light: ");
+    Serial.println(lux);
+  }
+
   // Humidity
   float rh = SHT2x.GetHumidity();
   Serial.print("Humidity(%RH): ");
@@ -311,6 +342,15 @@ void loop() {
     // Time Step
     file.print(String(ts));
     file.print(",");
+
+    // Light Level
+    if (BH1750_present) {
+      file.print(String(lux));
+      file.print(",");
+    } else {
+      file.print(",");
+    }
+    
 
     // Humidity
     file.print(String(rh));
@@ -434,7 +474,7 @@ void init_SPL06_007() {
 
   // If initialization failed
   if (!tries) {
-      Serial.println("Could not initialize pressure sensor");
+      log_info("Could not initialize pressure sensor");
       SPL06_present = false;
   }
 
