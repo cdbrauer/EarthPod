@@ -3,11 +3,13 @@
 #include "SPI.h"
 #include "SD.h"
 #include "Adafruit_Sensor.h"
-#include "RTClib.h"                  // RTC
-#include "BH1750.h"                  // Light level
-#include "SHT2x.h"                   // Humidity and temperature
-#include "Adafruit_BMP280.h"         // Air pressure, altitude, and temperature
-// SPL06-007 is manually accessed if used
+#include "RTClib.h"                         // RTC
+#include "BH1750.h"                         // Light level
+#include "SHT2x.h"                          // Humidity and temperature
+#include "Adafruit_BMP280.h"                // Air pressure, altitude, and temperature
+// SPL06-007 is manually accessed if used   // Air pressure, altitude, and temperature
+#include "Adafruit_FXOS8700.h"              // Accelerometer and magnetometer
+#include "Adafruit_FXAS21002C.h"            // Gyroscope
 
 // Function prototypes
 void blink_led(uint16_t delayTime = 500); // Warning - sensor malfunction, low battery
@@ -19,7 +21,7 @@ void read_SPL06_007(void);
 // Settings
 #define SAMPLE_INTERVAL_MS 60000
 #define FILE_BASE_NAME "Data"
-#define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Light,Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (BMP280/SPL06),Battery"
+#define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Light,Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (BMP280/SPL06),Accel X,Accel Y,Accel Z,Mag X,Mag Y,Mag Z,Gyro X,Gyro Y,Gyro Z,Battery"
 #define VBATPIN A7
 #define LOWBATTERY 3.6
 
@@ -27,19 +29,19 @@ void read_SPL06_007(void);
 bool sd_present = false;
 
 // V1
-// #define CHIP_DETECT 7
-// #define CHIP_SELECT 4
+#define CHIP_DETECT 7
+#define CHIP_SELECT 4
 
 // V2
-#define CHIP_DETECT A4
-#define CHIP_SELECT A5
+// #define CHIP_DETECT A4
+// #define CHIP_SELECT A5
 
-// Light sensor status
+// Sensor status
 bool BH1750_present = true;
-
-// Pressure sensor status
 bool BMP280_present = true;
 bool SPL06_present = false;
+bool FXOS8700_present = true;
+bool FXAS21002C_present = true;
 
 // Pressure sensor addresses
 const int  SPL06_007_I2C = 0x77;    // I2C Address for the temperature sensor
@@ -129,6 +131,8 @@ float measuredvbat;
 RTC_DS3231 rtc;
 BH1750 lightMeter;
 Adafruit_BMP280 bmp;
+Adafruit_FXOS8700 accelmag = Adafruit_FXOS8700(0x8700A, 0x8700B);
+Adafruit_FXAS21002C gyro = Adafruit_FXAS21002C(0x0021002C);
 
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
@@ -215,6 +219,20 @@ void setup() {
     log_info("SPL06_007 connected");
   } else {
     log_info("Pressure sensor not found");
+  }
+
+  if (accelmag.begin(ACCEL_RANGE_4G)) {
+    log_info("FXOS8700 connected");
+  } else {
+    FXOS8700_present = false;
+    log_info("FXOS8700 not found");
+  }
+
+  if (gyro.begin()) {
+    log_info("FXAS21002C connected");
+  } else {
+    FXAS21002C_present = false;
+    log_info("FXAS21002C not found");
   }
 
   // Create sensor data file //////////////////////////////////////////////////////////////
@@ -317,9 +335,16 @@ void loop() {
   Serial.print("Battery Voltage: " );
   Serial.println(measuredvbat);
   
+  // SD Card
+  Serial.print("SD Card Status: " );
+  Serial.println(sd_present);
+
   if(sd_present){
+    // Open file
     File file = SD.open(filename, FILE_WRITE);
     file.seek(EOF);
+    Serial.print("Filename: " );
+    Serial.println(filename);
 
     // Trial number
     file.print(String(counter));
@@ -349,8 +374,7 @@ void loop() {
       file.print(",");
     } else {
       file.print(",");
-    }
-    
+    }    
 
     // Humidity
     file.print(String(rh));
@@ -377,6 +401,41 @@ void loop() {
       file.print(",");
     } else {
       file.print(",");
+    }
+
+    // Accelerometer/Magnetometer
+    if (FXOS8700_present) {
+      sensors_event_t aevent, mevent;
+      accelmag.getEvent(&aevent, &mevent);
+      file.print(String(aevent.acceleration.x));
+      file.print(",");
+      file.print(String(aevent.acceleration.y));
+      file.print(",");
+      file.print(String(aevent.acceleration.z));
+      file.print(",");
+
+      file.print(String(mevent.magnetic.x));
+      file.print(",");
+      file.print(String(mevent.magnetic.y));
+      file.print(",");
+      file.print(String(mevent.magnetic.z));
+      file.print(",");
+    } else {
+      file.print(",,,,,,");
+    }
+  
+    // Gyro
+    if (FXAS21002C_present) {
+      sensors_event_t event;
+      gyro.getEvent(&event);
+      file.print(String(event.gyro.x));
+      file.print(",");
+      file.print(String(event.gyro.y));
+      file.print(",");
+      file.print(String(event.gyro.z));
+      file.print(",");
+    } else {
+      file.print(",,,");
     }
 
     // Battery Voltage
