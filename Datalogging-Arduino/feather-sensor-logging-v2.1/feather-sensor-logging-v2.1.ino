@@ -19,6 +19,8 @@ void init_SPL06_007(void);
 void read_SPL06_007(void);
 
 // Settings
+#define LED_ERROR 13
+#define LED_WRITE 8
 #define SAMPLE_INTERVAL_MS 60000
 #define FILE_BASE_NAME "Data"
 #define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Light,Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (BMP280/SPL06),Accel X,Accel Y,Accel Z,Mag X,Mag Y,Mag Z,Gyro X,Gyro Y,Gyro Z,Battery"
@@ -135,8 +137,10 @@ Adafruit_FXOS8700 accelmag = Adafruit_FXOS8700(0x8700A, 0x8700B);
 Adafruit_FXAS21002C gyro = Adafruit_FXAS21002C(0x0021002C);
 
 void setup() {
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, LOW);
+  pinMode(LED_ERROR, OUTPUT);
+  digitalWrite(LED_ERROR, LOW);
+  pinMode(LED_WRITE, OUTPUT);
+  digitalWrite(LED_WRITE, LOW);
   
   Wire.begin();
   Serial.begin(9600);
@@ -166,6 +170,7 @@ void setup() {
   // Try to initialize even if card is not detected
   if (!SD.begin(CHIP_SELECT)) {
     sd_present = false;
+    digitalWrite(LED_ERROR, HIGH);
     log_info("SD card failed");
   } else {
     sd_present = true;
@@ -341,6 +346,7 @@ void loop() {
 
   if(sd_present){
     // Open file
+    digitalWrite(LED_WRITE, HIGH);
     File file = SD.open(filename, FILE_WRITE);
     file.seek(EOF);
     Serial.print("Filename: " );
@@ -441,8 +447,10 @@ void loop() {
     // Battery Voltage
     file.print(String(measuredvbat));
     
+    // Close file
     file.println();
     file.close();
+    digitalWrite(LED_WRITE, LOW);
   }
 
   Serial.println();
@@ -476,14 +484,14 @@ void loop() {
 }
 
 void blink_led(uint16_t delayTime) {
-  digitalWrite(LED_BUILTIN, HIGH); // turn the LED on
+  digitalWrite(LED_ERROR, HIGH); // turn the LED on
   delay(delayTime);
-  digitalWrite(LED_BUILTIN, LOW);  // turn the LED off
+  digitalWrite(LED_ERROR, LOW);  // turn the LED off
   delay(delayTime);
 }
 
 void enable_led(uint16_t delayTime) {
-  digitalWrite(LED_BUILTIN, HIGH); // turn the LED on
+  digitalWrite(LED_ERROR, HIGH); // turn the LED on
   delay(delayTime);
 }
 
@@ -491,10 +499,12 @@ void log_info(String msg) {
   Serial.println(msg);
   
   if (sd_present) {
+    digitalWrite(LED_WRITE, HIGH);
     File logfile = SD.open(logfilename, FILE_WRITE);
     logfile.seek(EOF);
     logfile.println(msg);
     logfile.close();
+    digitalWrite(LED_WRITE, LOW);
   }
 }
 
