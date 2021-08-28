@@ -1,5 +1,5 @@
 # EarthPod
-Code for the [EarthPod](https://twitter.com/ASU_GDCS/status/1277711451856211975) environmental sensor pod.
+Code for the [EarthPod](https://cdbrauer.github.io/research/index.html#earthpod) environmental sensor pod.
 
 
 ## Datalogging-Arduino
@@ -8,36 +8,34 @@ Code for the [EarthPod](https://twitter.com/ASU_GDCS/status/1277711451856211975)
 
 The code in this folder is intended to be used in a sensor pod based on a Adafruit Feather M0 Adalogger. Connected sensors include:
 
-| Sensor | [V1](https://github.com/cdbrauer/EarthPod/tree/master/Datalogging-Arduino/feather-sensor-logging) | [V2](https://github.com/cdbrauer/EarthPod/tree/master/Datalogging-Arduino/feather-sensor-logging-v2) |
+| Sensor | [V1](https://github.com/cdbrauer/EarthPod/tree/master/Datalogging-Arduino/feather-sensor-logging-v1) | [V2](https://github.com/cdbrauer/EarthPod/tree/master/Datalogging-Arduino/feather-sensor-logging-v2.1) |
 | :------------- | :----------: | :-----------: |
 | RTC | DS3231 | DS3231 |
 | Gyroscope | FXAS21002C | FXAS21002C |
 | Acclerometer/Magnetometer | FXOS8700 | FXOS8700 |
 | Temperature/Humidity | si7021 | SHT21 |
-| Air Pressure/Temperature | BME280 | SPL06-007 |
+| Air Pressure/Temperature | BME280 | BMP280 or SPL06-007 |
 | Light Level | SI1145 | BH1750 |
 | Wind Direction | TCS34725 | N/A |
 | Wind Speed | Handheld Anemometer | N/A |
 
-### feather-sensor-logging.ino
+### feather-sensor-logging-v1
 
 *Compatible with V1 only*
 
 This program will create a .csv file on the Adalogger's SD card that records the measurements captured by the sensors. This program is only compatible with the Adafruit Feather M0 Adalogger, and will not fit on the Adafruit Feather 32u4 Adalogger due to memory constraints.
 
-### feather-sensor-logging-v2.ino
+### feather-sensor-logging-v2.1
 
 *Compatible with V2 Only*
 
 This program will create a .csv file on the Adalogger's SD card that records the measurements captured by the sensors. This program is only compatible with the Adafruit Feather M0 Adalogger, and will not fit on the Adafruit Feather 32u4 Adalogger due to memory constraints.
 
-### feather-all-i2c.ino
+### feather-sensor-tests/SPL06-007
 
-*Compatible with V1 only*
+Test I2C communication for an SPL06-007 air pressure and temperature sensor.
 
-This program will initialize all sensors and print readings to the serial terminal
-
-### feather-anemometer.ino
+### feather-sensor-tests/anemometer
 
 Test initialization and interrupts for a wind speed sensor from a [handheld anemometer](https://www.amazon.com/Anemometer-Velocity-Measurement-Thermometer-Windsurfing/dp/B01JOTJMU6/).
 
