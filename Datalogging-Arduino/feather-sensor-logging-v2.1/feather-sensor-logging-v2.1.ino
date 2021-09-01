@@ -1,4 +1,5 @@
 #include "Arduino.h"
+#include <Adafruit_SleepyDog.h>
 #include "Wire.h"
 #include "SPI.h"
 #include "SD.h"
@@ -20,7 +21,6 @@ void read_SPL06_007(void);
 
 // Settings
 #define LED_ERROR 13
-#define LED_WRITE 8
 #define SAMPLE_INTERVAL_MS 60000
 #define FILE_BASE_NAME "Data"
 #define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Light,Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (BMP280/SPL06),Accel X,Accel Y,Accel Z,Mag X,Mag Y,Mag Z,Gyro X,Gyro Y,Gyro Z,Battery"
@@ -31,12 +31,19 @@ void read_SPL06_007(void);
 bool sd_present = false;
 
 // V1
-#define CHIP_DETECT 7
-#define CHIP_SELECT 4
+//#define CHIP_DETECT 7
+//#define CHIP_SELECT 4
+//#define LED_WRITE 8
 
 // V2
-// #define CHIP_DETECT A4
-// #define CHIP_SELECT A5
+//#define CHIP_DETECT A4
+//#define CHIP_SELECT A5
+//#define LED_WRITE -1
+
+// V3
+#define CHIP_DETECT -1
+#define CHIP_SELECT 12
+#define LED_WRITE -1
 
 // Sensor status
 bool BH1750_present = true;
@@ -137,10 +144,15 @@ Adafruit_FXOS8700 accelmag = Adafruit_FXOS8700(0x8700A, 0x8700B);
 Adafruit_FXAS21002C gyro = Adafruit_FXAS21002C(0x0021002C);
 
 void setup() {
-  pinMode(LED_ERROR, OUTPUT);
-  digitalWrite(LED_ERROR, LOW);
-  pinMode(LED_WRITE, OUTPUT);
-  digitalWrite(LED_WRITE, LOW);
+  if (LED_ERROR >= 0) {
+    pinMode(LED_ERROR, OUTPUT);
+    digitalWrite(LED_ERROR, LOW);
+  }
+  
+  if (LED_WRITE >= 0) {
+    pinMode(LED_WRITE, OUTPUT);
+    digitalWrite(LED_WRITE, LOW);
+  }
   
   Wire.begin();
   Serial.begin(9600);
@@ -161,16 +173,18 @@ void setup() {
   }
 
   // Initialize the SD card ///////////////////////////////////////////////////////////////  
-  pinMode(CHIP_DETECT, INPUT);
-  if (!digitalRead(CHIP_DETECT)) {
-    sd_present = false;
-    log_info("SD card not present");
+  if (CHIP_DETECT >= 0) {
+    pinMode(CHIP_DETECT, INPUT);
+    if (!digitalRead(CHIP_DETECT)) {
+      sd_present = false;
+      log_info("SD card not present");
+    }
   }
 
   // Try to initialize even if card is not detected
   if (!SD.begin(CHIP_SELECT)) {
     sd_present = false;
-    digitalWrite(LED_ERROR, HIGH);
+    if (LED_ERROR >= 0) {digitalWrite(LED_ERROR, HIGH);}
     log_info("SD card failed");
   } else {
     sd_present = true;
@@ -269,9 +283,11 @@ void setup() {
 
   // Get start time ///////////////////////////////////////////////////////////////////////
   t0 = millis();
+  int wdtCountdown = Watchdog.enable(2000);
 }
 
-void loop() {
+void loop() {  
+  Watchdog.reset();
   Serial.println("===================");
   
   // RTC
@@ -346,7 +362,7 @@ void loop() {
 
   if(sd_present){
     // Open file
-    digitalWrite(LED_WRITE, HIGH);
+    if (LED_WRITE >= 0) {digitalWrite(LED_WRITE, HIGH);}
     File file = SD.open(filename, FILE_WRITE);
     file.seek(EOF);
     Serial.print("Filename: " );
@@ -450,13 +466,15 @@ void loop() {
     // Close file
     file.println();
     file.close();
-    digitalWrite(LED_WRITE, LOW);
+    if (LED_WRITE >= 0) {digitalWrite(LED_WRITE, LOW);}
   }
 
   Serial.println();
   counter++;
 
   while((millis() - t0) < SAMPLE_INTERVAL_MS){
+    Watchdog.reset();
+    
     if (!sd_present) {
       enable_led(); // If the SD card is missing or failed to initialize, turn the status led on
     } else if (measuredvbat <= LOWBATTERY) {
@@ -469,42 +487,59 @@ void loop() {
 
     if (Serial.available() > 0) {
       char receivedChar = Serial.read();
-      log_info("Clock reset requested, setting time");
-      rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-
-      char dt[16];
-      char tm[16];
-      DateTime now = rtc.now();
-      sprintf(dt, "%02d/%02d/%02d", now.year(),now.month(),now.day());
-      sprintf(tm, "%02d:%02d:%02d", now.hour(),now.minute(),now.second());
-      log_info(dt);
-      log_info(tm);
+      if (receivedChar == 'c') {
+        log_info("c -> Clock reset requested, setting time");
+        rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  
+        char dt[16];
+        char tm[16];
+        DateTime now = rtc.now();
+        sprintf(dt, "%02d/%02d/%02d", now.year(),now.month(),now.day());
+        sprintf(tm, "%02d:%02d:%02d", now.hour(),now.minute(),now.second());
+        log_info(dt);
+        log_info(tm);
+      } else if (receivedChar == 's') {
+        log_info("s -> Manual sample requested");
+        break; // Skip waiting for sample interval
+      } else if (receivedChar == 'r') {
+        log_info("r -> Reset requested");
+        Serial.flush();
+        while(1){enable_led();} // Allow watchdog timer to expire
+      }
     }
   }
 }
 
 void blink_led(uint16_t delayTime) {
-  digitalWrite(LED_ERROR, HIGH); // turn the LED on
-  delay(delayTime);
-  digitalWrite(LED_ERROR, LOW);  // turn the LED off
-  delay(delayTime);
+  if (LED_ERROR >= 0) {
+    digitalWrite(LED_ERROR, HIGH); // turn the LED on
+    delay(delayTime);
+    digitalWrite(LED_ERROR, LOW);  // turn the LED off
+    delay(delayTime);
+  } else {
+    delay(delayTime * 2);
+  }
 }
 
 void enable_led(uint16_t delayTime) {
-  digitalWrite(LED_ERROR, HIGH); // turn the LED on
-  delay(delayTime);
+  if (LED_ERROR >= 0) {
+    digitalWrite(LED_ERROR, HIGH); // turn the LED on
+    delay(delayTime);
+  } else {
+    delay(delayTime);
+  }
 }
 
 void log_info(String msg) {
   Serial.println(msg);
   
   if (sd_present) {
-    digitalWrite(LED_WRITE, HIGH);
+    if (LED_WRITE >= 0) {digitalWrite(LED_WRITE, HIGH);}
     File logfile = SD.open(logfilename, FILE_WRITE);
     logfile.seek(EOF);
     logfile.println(msg);
     logfile.close();
-    digitalWrite(LED_WRITE, LOW);
+    if (LED_WRITE >= 0) {digitalWrite(LED_WRITE, LOW);}
   }
 }
 
