@@ -4,13 +4,13 @@
 #include "SPI.h"
 #include "SD.h"
 #include "Adafruit_Sensor.h"
-#include "RTClib.h"                         // RTC
-#include "BH1750.h"                         // Light level
-#include "SHT2x.h"                          // Humidity and temperature
-#include "Adafruit_BMP280.h"                // Air pressure, altitude, and temperature
-// SPL06-007 is manually accessed if used   // Air pressure, altitude, and temperature
-#include "Adafruit_FXOS8700.h"              // Accelerometer and magnetometer
-#include "Adafruit_FXAS21002C.h"            // Gyroscope
+#include "RTClib.h"                         // RTC (0x68)
+#include "BH1750.h"                         // Light level (0x23)
+#include "SHT2x.h"                          // Humidity and temperature (0x40)
+#include "Adafruit_BMP280.h"                // Air pressure, altitude, and temperature (0x76, 0x77)
+// SPL06-007 is manually accessed if used   // Air pressure, altitude, and temperature (0x76, 0x77)
+#include "Adafruit_FXOS8700.h"              // Accelerometer and magnetometer (0x1F)
+#include "Adafruit_FXAS21002C.h"            // Gyroscope (0x21)
 
 // Function prototypes
 void blink_led(uint16_t delayTime = 500); // Warning - sensor malfunction, low battery
@@ -26,6 +26,12 @@ void read_SPL06_007(void);
 #define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Light,Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (BMP280/SPL06),Accel X,Accel Y,Accel Z,Mag X,Mag Y,Mag Z,Gyro X,Gyro Y,Gyro Z,Battery"
 #define VBATPIN A7
 #define LOWBATTERY 3.6
+
+// Addresses
+const int ADDR_PRESSURE = 0x77;
+const int ADDR_LIGHT = 0x23;
+const int ADDR_ACCEL = 0x1F;
+const int ADDR_GYRO = 0x21;
 
 // SD card settings
 bool sd_present = false;
@@ -53,7 +59,6 @@ bool FXOS8700_present = true;
 bool FXAS21002C_present = true;
 
 // Pressure sensor addresses
-const int  SPL06_007_I2C = 0x77;    // I2C Address for the temperature sensor
 const byte REG_PSR       = 0x00;    // Register Address: Pressure Value (3 bytes)
 const byte REG_TMP       = 0x03;    // Register Address: Temperature Value (3 bytes)
 const byte REG_PRS_CFG   = 0x06;    // Register Address: Pressure configuration (1 byte)
@@ -138,10 +143,10 @@ float measuredvbat;
 
 // Create sensor objects
 RTC_DS3231 rtc;
-BH1750 lightMeter;
+BH1750 lightMeter(ADDR_LIGHT);
 Adafruit_BMP280 bmp;
-Adafruit_FXOS8700 accelmag = Adafruit_FXOS8700(0x8700A, 0x8700B);
-Adafruit_FXAS21002C gyro = Adafruit_FXAS21002C(0x0021002C);
+Adafruit_FXOS8700 accelmag(0x8700A, 0x8700B);
+Adafruit_FXAS21002C gyro(0x0021002C);
 
 void setup() {
   if (LED_ERROR >= 0) {
@@ -155,7 +160,7 @@ void setup() {
   }
   
   Wire.begin();
-  Serial.begin(9600);
+  Serial.begin(115200);
   delay(2000);  
   
   // Check the Battery Voltage ////////////////////////////////////////////////////////////
@@ -219,7 +224,8 @@ void setup() {
     log_info("Light sensor not found");
   }
 
-  if (!bmp.begin(0x76)) {
+  if (!bmp.begin(ADDR_PRESSURE)) {
+    log_info("BMP280 not found, searching for SPL06_007");
     BMP280_present = false;
     SPL06_present = true;
     init_SPL06_007();
@@ -240,14 +246,14 @@ void setup() {
     log_info("Pressure sensor not found");
   }
 
-  if (accelmag.begin(ACCEL_RANGE_4G)) {
+  if (accelmag.begin(ADDR_ACCEL)) {
     log_info("FXOS8700 connected");
   } else {
     FXOS8700_present = false;
     log_info("FXOS8700 not found");
   }
 
-  if (gyro.begin()) {
+  if (gyro.begin(ADDR_GYRO)) {
     log_info("FXAS21002C connected");
   } else {
     FXAS21002C_present = false;
@@ -549,20 +555,20 @@ void init_SPL06_007() {
   uint8_t tries = 5;
   while(tries > 0){
       // Check chip ID
-      Wire.beginTransmission (SPL06_007_I2C);
+      Wire.beginTransmission (ADDR_PRESSURE);
       Wire.write             (REG_ID);
       Wire.endTransmission   ();
-      Wire.requestFrom       (SPL06_007_I2C, 1);
+      Wire.requestFrom       (ADDR_PRESSURE, 1);
       byte device_id = Wire.read();
       Serial.print("Device ID: ");
       Serial.println(device_id, BIN);
       
       if (device_id == 0x10) {
           // Check if sensors are ready
-          Wire.beginTransmission (SPL06_007_I2C);
+          Wire.beginTransmission (ADDR_PRESSURE);
           Wire.write             (REG_MEAS_CFG);
           Wire.endTransmission   ();
-          Wire.requestFrom       (SPL06_007_I2C, 1);        
+          Wire.requestFrom       (ADDR_PRESSURE, 1);        
           byte meas_cfg = Wire.read();
           Serial.print("Measurement configuration: ");       
           Serial.println(meas_cfg, BIN);
@@ -584,10 +590,10 @@ void init_SPL06_007() {
 
   if (SPL06_present) {
     // Read calibration coefficients
-    Wire.beginTransmission (SPL06_007_I2C);
+    Wire.beginTransmission (ADDR_PRESSURE);
     Wire.write             (REG_COEF);
     Wire.endTransmission   ();
-    Wire.requestFrom       (SPL06_007_I2C, 18);
+    Wire.requestFrom       (ADDR_PRESSURE, 18);
   
     byte coef_bytes[18];
     for(uint8_t i = 0; i < 18; i++){
@@ -649,7 +655,7 @@ void init_SPL06_007() {
     // measurement time(ms): 3.6    | 5.2 | 8.4 | 14.8 | 27.6 | 53.2 | 104.4 | 206.8
     // precision(PaRMS)    : 5.0    |     | 2.5 |      | 1.2  | 0.9  | 0.5   |
     // note: use in combination with a bit shift when the oversampling rate is > 8 times. see CFG_REG(0x19) register
-    Wire.beginTransmission (SPL06_007_I2C);
+    Wire.beginTransmission (ADDR_PRESSURE);
     Wire.write             (REG_PRS_CFG);
     Wire.write             (0 << 4 | 4);
     Wire.endTransmission   ();
@@ -670,7 +676,7 @@ void init_SPL06_007() {
     // oversampling (times): single | 2 | 4 | 8 | 16 | 32 | 64 | 128
     // note: single(default) measurement time 3.6ms, other settings are optional, and may not be relevant
     // note: use in combination with a bit shift when the oversampling rate is > 8 times. see CFG_REG(0x19) register
-    Wire.beginTransmission (SPL06_007_I2C);
+    Wire.beginTransmission (ADDR_PRESSURE);
     Wire.write             (REG_TMP_CFG);
     Wire.write             (1 << 7 | 0 << 4 | 3);
     Wire.endTransmission   ();
@@ -679,7 +685,7 @@ void init_SPL06_007() {
     // measurement mode: stop meas |  command mode(single) |    na |            background mode(continuous) |
     // measurement type:      idle | pres meas | temp meas |    na | pres meas | temp meas | pres&temp meas |
     // MEAS_CTRL[2:0]  :         0 |         1 |         2 | 3 | 4 |         5 |         6 |              7 |
-    Wire.beginTransmission (SPL06_007_I2C);
+    Wire.beginTransmission (ADDR_PRESSURE);
     Wire.write             (REG_MEAS_CFG);
     Wire.write             (7);
     Wire.endTransmission   ();  
@@ -700,7 +706,7 @@ void init_SPL06_007() {
     //
     // bit0: set to '0' for 4-wire interface
     //       set to '1' for 3-wire interface
-    Wire.beginTransmission (SPL06_007_I2C);
+    Wire.beginTransmission (ADDR_PRESSURE);
     Wire.write             (REG_CFG);
     Wire.write             (1 << 2);
     Wire.endTransmission   ();
@@ -715,10 +721,10 @@ void init_SPL06_007() {
 
 void read_SPL06_007() {
   // Read temperature
-  Wire.beginTransmission (SPL06_007_I2C);
+  Wire.beginTransmission (ADDR_PRESSURE);
   Wire.write             (REG_TMP);
   Wire.endTransmission   ();
-  Wire.requestFrom       (SPL06_007_I2C, 3);
+  Wire.requestFrom       (ADDR_PRESSURE, 3);
 
   byte tmp_bytes[3];
   for(uint8_t i = 0; i < 3; i++){
@@ -732,10 +738,10 @@ void read_SPL06_007() {
   bmp_spl_temperature = (float)c0 * 0.5f + (float)c1 * ftsc;
 
   // Read pressure
-  Wire.beginTransmission (SPL06_007_I2C);
+  Wire.beginTransmission (ADDR_PRESSURE);
   Wire.write             (REG_PSR);
   Wire.endTransmission   ();
-  Wire.requestFrom       (SPL06_007_I2C, 3);
+  Wire.requestFrom       (ADDR_PRESSURE, 3);
 
   byte psr_bytes[3];
   for(uint8_t i = 0; i < 3; i++){
