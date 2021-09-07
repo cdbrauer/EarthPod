@@ -31,7 +31,7 @@ void read_SPL06_007(void);
 #define LED_ERROR 13
 #define SAMPLE_INTERVAL_MS 60000
 #define FILE_BASE_NAME "Data"
-#define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Light (BH1750),Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (BMP280/SPL06),Accel X,Accel Y,Accel Z,Mag X,Mag Y,Mag Z,Gyro X,Gyro Y,Gyro Z,Battery,Moisture (2cm),Moisture (5cm),Temp (2cm),Temp (5cm),Light,Temp (SRH 1),Humidity (SRH1),Temp (SRH2),Humidity (SRH2)"
+#define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Light (BH1750),Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (BMP280/SPL06),Accel X,Accel Y,Accel Z,Mag X,Mag Y,Mag Z,Gyro X,Gyro Y,Gyro Z,Battery,Moisture (2cm),Moisture (5cm),Temp (2cm),Temp (5cm),Light,Temp (SRH1),Humidity (SRH1)"
 #define VBATPIN A7
 #define LOWBATTERY 3.6
 
@@ -213,8 +213,8 @@ void setup() {
   measuredvbat *= 2;    // we divided by 2, so multiply back
   measuredvbat *= 3.3;  // Multiply by 3.3V, our reference voltage
   measuredvbat /= 4096; // convert to voltage
-  log_info("Battery Voltage: " );
-  log_info(measuredvbat);
+  Serial.print("Battery Voltage: ");
+  Serial.println(measuredvbat);
 
   if (measuredvbat <= LOWBATTERY) {
     log_info("Low battery, halting");
