@@ -6,11 +6,19 @@
 #include "Adafruit_Sensor.h"
 #include "RTClib.h"                         // RTC (0x68)
 #include "BH1750.h"                         // Light level (0x23)
+
+// This library is in the libraries folder on the GitHub repo
+// The library with this name in the Arduino library manager is different and will NOT work
 #include "SHT2x.h"                          // Humidity and temperature (0x40)
+
 #include "Adafruit_BMP280.h"                // Air pressure, altitude, and temperature (0x76, 0x77)
 // SPL06-007 is manually accessed if used   // Air pressure, altitude, and temperature (0x76, 0x77)
 #include "Adafruit_FXOS8700.h"              // Accelerometer and magnetometer (0x1F)
 #include "Adafruit_FXAS21002C.h"            // Gyroscope (0x21)
+#include "WiFi101.h"
+#include "secrets.h"
+#include "ThingSpeak.h"
+#include "Adafruit_AM2315.h"
 
 // Function prototypes
 void blink_led(uint16_t delayTime = 500); // Warning - sensor malfunction, low battery
@@ -23,15 +31,23 @@ void read_SPL06_007(void);
 #define LED_ERROR 13
 #define SAMPLE_INTERVAL_MS 60000
 #define FILE_BASE_NAME "Data"
-#define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Light,Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (BMP280/SPL06),Accel X,Accel Y,Accel Z,Mag X,Mag Y,Mag Z,Gyro X,Gyro Y,Gyro Z,Battery"
+#define HEADINGS "ID,Year,Month,Day,Hour,Minute,Second,Time Step,Light (BH1750),Humidity,Pressure,Altitude,Temp (DS3231),Temp (SHT21),Temp (BMP280/SPL06),Accel X,Accel Y,Accel Z,Mag X,Mag Y,Mag Z,Gyro X,Gyro Y,Gyro Z,Battery,Moisture (2cm),Moisture (5cm),Temp (2cm),Temp (5cm),Light,Temp (SRH 1),Humidity (SRH1),Temp (SRH2),Humidity (SRH2)"
 #define VBATPIN A7
 #define LOWBATTERY 3.6
 
 // Addresses
-const int ADDR_PRESSURE = 0x77;
+const int ADDR_PRESSURE_BMP = 0x76;
+const int ADDR_PRESSURE_SPL = 0x77;
 const int ADDR_LIGHT = 0x23;
 const int ADDR_ACCEL = 0x1F;
 const int ADDR_GYRO = 0x21;
+
+// Soil sensor pins
+#define SOIL_2CM A0
+#define SOIL_5CM A1
+#define TEMP_2CM A4
+#define TEMP_5CM A2
+#define LIGHT_OUT A5
 
 // SD card settings
 bool sd_present = false;
@@ -57,6 +73,7 @@ bool BMP280_present = true;
 bool SPL06_present = false;
 bool FXOS8700_present = true;
 bool FXAS21002C_present = true;
+bool AM2315_0_present = true;
 
 // Pressure sensor addresses
 const byte REG_PSR       = 0x00;    // Register Address: Pressure Value (3 bytes)
@@ -147,6 +164,25 @@ BH1750 lightMeter(ADDR_LIGHT);
 Adafruit_BMP280 bmp;
 Adafruit_FXOS8700 accelmag(0x8700A, 0x8700B);
 Adafruit_FXAS21002C gyro(0x0021002C);
+WiFiClient client;
+Adafruit_AM2315 AM2315_0;
+
+// Wifi channel fields
+unsigned long myChannelNumber = SECRET_CH_ID;
+const char * myWriteAPIKey = SECRET_WRITE_APIKEY;
+char ssid[] = SECRET_SSID;
+char pass[] = SECRET_PASS;
+int status = WL_IDLE_STATUS;     // the WiFi radio's status
+
+// Analog sensor variables
+int soil_moisture_2cm = 0;
+int soil_moisture_5cm = 0;
+int soil_temp_2cm = 0;
+int soil_temp_5cm = 0;
+int light_analog = 0;
+
+// RH Soil sensor varaibles
+float AM2315_temp0, AM2315_hum0;
 
 void setup() {
   if (LED_ERROR >= 0) {
@@ -159,17 +195,24 @@ void setup() {
     digitalWrite(LED_WRITE, LOW);
   }
   
+  analogReadResolution(12);
+  
+  WiFi.setPins(8,7,4,2); // feather M0 wifi module pins 
+  WiFi.lowPowerMode();
   Wire.begin();
-  Serial.begin(115200);
-  delay(2000);  
+  
+  ThingSpeak.begin(client);
+  
+  Serial.begin(9600);
+  delay(2000);
   
   // Check the Battery Voltage ////////////////////////////////////////////////////////////
   measuredvbat = analogRead(VBATPIN);
   measuredvbat *= 2;    // we divided by 2, so multiply back
   measuredvbat *= 3.3;  // Multiply by 3.3V, our reference voltage
-  measuredvbat /= 1024; // convert to voltage
-  Serial.print("Battery Voltage: " );
-  Serial.println(measuredvbat);
+  measuredvbat /= 4096; // convert to voltage
+  log_info("Battery Voltage: " );
+  log_info(measuredvbat);
 
   if (measuredvbat <= LOWBATTERY) {
     log_info("Low battery, halting");
@@ -217,6 +260,15 @@ void setup() {
   log_info(dt);
   log_info(tm);
 
+  delay(1000);
+  
+  log_info("Sensor Soil RH Test 1");
+  if (!AM2315_0.begin()) {
+     log_info("Sensor Soil RH not found, check wiring & pullups!");
+     AM2315_0_present = false;
+  }
+  else log_info("Soil RH Sensor 1 Found");
+  
   if (lightMeter.begin()) {
     log_info("BH1750 connected");
   } else {
@@ -224,7 +276,7 @@ void setup() {
     log_info("Light sensor not found");
   }
 
-  if (!bmp.begin(ADDR_PRESSURE)) {
+  if (!bmp.begin(ADDR_PRESSURE_BMP)) {
     log_info("BMP280 not found, searching for SPL06_007");
     BMP280_present = false;
     SPL06_present = true;
@@ -287,6 +339,26 @@ void setup() {
     log_info(filename);
   }
 
+  // check for the presence of the wifi module:
+  if (WiFi.status() == WL_NO_SHIELD) {
+    log_info("WiFi shield not present, halting");
+    Serial.flush();
+    while(1){enable_led();}
+  }
+
+  // attempt to connect to WiFi network:
+  while (status != WL_CONNECTED) {
+    log_info("Attempting to connect to WPA SSID: ");
+    log_info(ssid);
+    status = WiFi.begin(ssid, pass);
+
+    // wait 10 seconds for connection:
+    delay(10000);
+  }
+
+  // you're connected now, so print out the data:
+  log_info("You're connected to the network");
+  
   // Get start time ///////////////////////////////////////////////////////////////////////
   t0 = millis();
   int wdtCountdown = Watchdog.enable(2000);
@@ -324,8 +396,28 @@ void loop() {
 
   // Humidity
   float rh = SHT2x.GetHumidity();
-  Serial.print("Humidity(%RH): ");
+  Serial.print("Ambient Humidity(%RH): ");
   Serial.println(rh);
+
+  // Analog signals
+  soil_moisture_2cm = analogRead(SOIL_2CM);
+  soil_moisture_5cm = analogRead(SOIL_5CM);
+  soil_temp_2cm = analogRead(TEMP_2CM);
+  soil_temp_5cm = analogRead(TEMP_5CM);
+  light_analog = analogRead(LIGHT_OUT);
+  
+  Serial.print("Soil Moisture Readings: ");
+  Serial.print(soil_moisture_2cm);
+  Serial.print(", ");
+  Serial.println(soil_moisture_5cm);
+
+  Serial.print("Soil Temp Readings: ");
+  Serial.print(soil_temp_2cm);
+  Serial.print(", ");
+  Serial.println(soil_temp_5cm);  
+
+  Serial.print("Light Reading: ");
+  Serial.println(light_analog);
 
   // Pressure and altitude
   if (BMP280_present) {
@@ -354,11 +446,22 @@ void loop() {
     Serial.println(bmp_spl_altitude, DEC);
   }
 
+  // RH Soil Sensors
+  if (AM2315_0_present == true) {
+    if (! AM2315_0.readTemperatureAndHumidity(&AM2315_temp0, &AM2315_hum0)) {
+      Serial.println("Failed to read data from AM2315-0");
+    }
+    else {
+      Serial.print("AM2315 0 soil Temp *C: "); Serial.println(AM2315_temp0);
+      Serial.print("AM2315 0 soil Hum %: "); Serial.println(AM2315_hum0);
+    }
+  }
+
   // Battery Voltage
   measuredvbat = analogRead(VBATPIN);
   measuredvbat *= 2;    // we divided by 2, so multiply back
   measuredvbat *= 3.3;  // Multiply by 3.3V, our reference voltage
-  measuredvbat /= 1024; // convert to voltage
+  measuredvbat /= 4096; // convert to voltage
   Serial.print("Battery Voltage: " );
   Serial.println(measuredvbat);
   
@@ -468,12 +571,52 @@ void loop() {
 
     // Battery Voltage
     file.print(String(measuredvbat));
+    file.print(",");
+
+    // Soil Mositure & Temperature
+    file.print(String(soil_moisture_2cm));
+    file.print(",");
+    file.print(String(soil_moisture_5cm));
+    file.print(",");
+    file.print(String(soil_temp_2cm));
+    file.print(",");
+    file.print(String(soil_temp_5cm));
+    file.print(",");
     
-    // Close file
+    // Light
+    file.print(String(light_analog));
+    file.print(",");
+
+    // Relative soil humidity sensor data
+    if (AM2315_0_present == true) {
+      file.print(String(AM2315_temp0));
+      file.print(",");
+      file.print(String(AM2315_hum0));
+      file.print(",");
+    }
+    else file.print(",,"); 
+    
     file.println();
     file.close();
     if (LED_WRITE >= 0) {digitalWrite(LED_WRITE, LOW);}
   }
+
+  
+/*  
+// Upload to ThingSpeak
+  ThingSpeak.setField(1, temp_ds3231);
+  ThingSpeak.setField(2, temp_sht21);
+  ThingSpeak.setField(3, rh);
+  ThingSpeak.setField(4, measuredvbat);
+
+  int x = ThingSpeak.writeFields(myChannelNumber, myWriteAPIKey);
+  if(x == 200){
+    Serial.println("Channel update successful.");
+  }
+  else{
+    Serial.println("Problem updating channel. HTTP error code " + String(x));
+  }
+*/
 
   Serial.println();
   counter++;
@@ -555,20 +698,20 @@ void init_SPL06_007() {
   uint8_t tries = 5;
   while(tries > 0){
       // Check chip ID
-      Wire.beginTransmission (ADDR_PRESSURE);
+      Wire.beginTransmission (ADDR_PRESSURE_SPL);
       Wire.write             (REG_ID);
       Wire.endTransmission   ();
-      Wire.requestFrom       (ADDR_PRESSURE, 1);
+      Wire.requestFrom       (ADDR_PRESSURE_SPL, 1);
       byte device_id = Wire.read();
       Serial.print("Device ID: ");
       Serial.println(device_id, BIN);
       
       if (device_id == 0x10) {
           // Check if sensors are ready
-          Wire.beginTransmission (ADDR_PRESSURE);
+          Wire.beginTransmission (ADDR_PRESSURE_SPL);
           Wire.write             (REG_MEAS_CFG);
           Wire.endTransmission   ();
-          Wire.requestFrom       (ADDR_PRESSURE, 1);        
+          Wire.requestFrom       (ADDR_PRESSURE_SPL, 1);        
           byte meas_cfg = Wire.read();
           Serial.print("Measurement configuration: ");       
           Serial.println(meas_cfg, BIN);
@@ -584,16 +727,16 @@ void init_SPL06_007() {
 
   // If initialization failed
   if (!tries) {
-      log_info("Could not initialize pressure sensor");
+      Serial.println("Could not initialize pressure sensor");
       SPL06_present = false;
   }
 
   if (SPL06_present) {
     // Read calibration coefficients
-    Wire.beginTransmission (ADDR_PRESSURE);
+    Wire.beginTransmission (ADDR_PRESSURE_SPL);
     Wire.write             (REG_COEF);
     Wire.endTransmission   ();
-    Wire.requestFrom       (ADDR_PRESSURE, 18);
+    Wire.requestFrom       (ADDR_PRESSURE_SPL, 18);
   
     byte coef_bytes[18];
     for(uint8_t i = 0; i < 18; i++){
@@ -655,7 +798,7 @@ void init_SPL06_007() {
     // measurement time(ms): 3.6    | 5.2 | 8.4 | 14.8 | 27.6 | 53.2 | 104.4 | 206.8
     // precision(PaRMS)    : 5.0    |     | 2.5 |      | 1.2  | 0.9  | 0.5   |
     // note: use in combination with a bit shift when the oversampling rate is > 8 times. see CFG_REG(0x19) register
-    Wire.beginTransmission (ADDR_PRESSURE);
+    Wire.beginTransmission (ADDR_PRESSURE_SPL);
     Wire.write             (REG_PRS_CFG);
     Wire.write             (0 << 4 | 4);
     Wire.endTransmission   ();
@@ -676,7 +819,7 @@ void init_SPL06_007() {
     // oversampling (times): single | 2 | 4 | 8 | 16 | 32 | 64 | 128
     // note: single(default) measurement time 3.6ms, other settings are optional, and may not be relevant
     // note: use in combination with a bit shift when the oversampling rate is > 8 times. see CFG_REG(0x19) register
-    Wire.beginTransmission (ADDR_PRESSURE);
+    Wire.beginTransmission (ADDR_PRESSURE_SPL);
     Wire.write             (REG_TMP_CFG);
     Wire.write             (1 << 7 | 0 << 4 | 3);
     Wire.endTransmission   ();
@@ -685,7 +828,7 @@ void init_SPL06_007() {
     // measurement mode: stop meas |  command mode(single) |    na |            background mode(continuous) |
     // measurement type:      idle | pres meas | temp meas |    na | pres meas | temp meas | pres&temp meas |
     // MEAS_CTRL[2:0]  :         0 |         1 |         2 | 3 | 4 |         5 |         6 |              7 |
-    Wire.beginTransmission (ADDR_PRESSURE);
+    Wire.beginTransmission (ADDR_PRESSURE_SPL);
     Wire.write             (REG_MEAS_CFG);
     Wire.write             (7);
     Wire.endTransmission   ();  
@@ -706,7 +849,7 @@ void init_SPL06_007() {
     //
     // bit0: set to '0' for 4-wire interface
     //       set to '1' for 3-wire interface
-    Wire.beginTransmission (ADDR_PRESSURE);
+    Wire.beginTransmission (ADDR_PRESSURE_SPL);
     Wire.write             (REG_CFG);
     Wire.write             (1 << 2);
     Wire.endTransmission   ();
@@ -721,10 +864,10 @@ void init_SPL06_007() {
 
 void read_SPL06_007() {
   // Read temperature
-  Wire.beginTransmission (ADDR_PRESSURE);
+  Wire.beginTransmission (ADDR_PRESSURE_SPL);
   Wire.write             (REG_TMP);
   Wire.endTransmission   ();
-  Wire.requestFrom       (ADDR_PRESSURE, 3);
+  Wire.requestFrom       (ADDR_PRESSURE_SPL, 3);
 
   byte tmp_bytes[3];
   for(uint8_t i = 0; i < 3; i++){
@@ -738,10 +881,10 @@ void read_SPL06_007() {
   bmp_spl_temperature = (float)c0 * 0.5f + (float)c1 * ftsc;
 
   // Read pressure
-  Wire.beginTransmission (ADDR_PRESSURE);
+  Wire.beginTransmission (ADDR_PRESSURE_SPL);
   Wire.write             (REG_PSR);
   Wire.endTransmission   ();
-  Wire.requestFrom       (ADDR_PRESSURE, 3);
+  Wire.requestFrom       (ADDR_PRESSURE_SPL, 3);
 
   byte psr_bytes[3];
   for(uint8_t i = 0; i < 3; i++){
