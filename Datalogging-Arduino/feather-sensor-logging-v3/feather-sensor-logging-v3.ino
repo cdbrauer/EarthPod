@@ -16,7 +16,7 @@
 #include "Adafruit_FXOS8700.h"              // Accelerometer and magnetometer (0x1F)
 #include "Adafruit_FXAS21002C.h"            // Gyroscope (0x21)
 #include "WiFi101.h"
-#include "secrets.h"
+#include "secrets_pod1.h"
 #include "ThingSpeak.h"
 #include "Adafruit_AM2315.h"
 
@@ -170,6 +170,8 @@ Adafruit_AM2315 AM2315_0;
 // Wifi channel fields
 unsigned long myChannelNumber = SECRET_CH_ID;
 const char * myWriteAPIKey = SECRET_WRITE_APIKEY;
+unsigned long myChannelNumber2 = SECRET_CH_ID2;
+const char * myWriteAPIKey2 = SECRET_WRITE_APIKEY2;
 char ssid[] = SECRET_SSID;
 char pass[] = SECRET_PASS;
 int status = WL_IDLE_STATUS;     // the WiFi radio's status
@@ -599,15 +601,16 @@ void loop() {
     file.println();
     file.close();
     if (LED_WRITE >= 0) {digitalWrite(LED_WRITE, LOW);}
-  }
-
+  } 
+ 
+  //Upload to ThingSpeak
   
-/*  
-// Upload to ThingSpeak
-  ThingSpeak.setField(1, temp_ds3231);
+  ThingSpeak.setField(1, bmp_spl_pressure);
   ThingSpeak.setField(2, temp_sht21);
   ThingSpeak.setField(3, rh);
   ThingSpeak.setField(4, measuredvbat);
+  ThingSpeak.setField(5, AM2315_temp0);
+  ThingSpeak.setField(6, AM2315_hum0);
 
   int x = ThingSpeak.writeFields(myChannelNumber, myWriteAPIKey);
   if(x == 200){
@@ -616,7 +619,19 @@ void loop() {
   else{
     Serial.println("Problem updating channel. HTTP error code " + String(x));
   }
-*/
+
+  ThingSpeak.setField(1, soil_moisture_2cm);
+  ThingSpeak.setField(2, soil_moisture_5cm);
+  ThingSpeak.setField(3, soil_moisture_2cm);
+  ThingSpeak.setField(4, soil_moisture_5cm);
+
+  int y = ThingSpeak.writeFields(myChannelNumber2, myWriteAPIKey2);
+  if(y == 200){
+    Serial.println("Channel update successful.");
+  }
+  else{
+    Serial.println("Problem updating channel. HTTP error code " + String(x));
+  }
 
   Serial.println();
   counter++;
